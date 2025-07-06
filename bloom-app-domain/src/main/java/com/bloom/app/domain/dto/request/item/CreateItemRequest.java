@@ -1,4 +1,4 @@
-package com.bloom.app.dto.request.item;
+package com.bloom.app.domain.dto.request.item;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -13,12 +13,15 @@ import lombok.NoArgsConstructor;
 @Builder
 public class CreateItemRequest {
     @NotBlank
-    private String itemName;
+    private String name;
     @NotBlank
-    private String itemCode;
+    private String sku;
 
     private String description;
 
     @NotNull
     private Double price;
+
+    @NotNull
+    private Integer quantity;
 }

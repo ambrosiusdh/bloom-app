@@ -1,4 +1,4 @@
-package com.bloom.app.dto.request.item;
+package com.bloom.app.domain.dto.request.item;
 
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;

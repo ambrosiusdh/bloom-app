@@ -1,4 +1,4 @@
-package com.bloom.app.model;
+package com.bloom.app.domain.model;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -13,19 +13,22 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @Builder
 @Entity
-@Table(name = "items")
-public class Item {
+@Table(name = "users")
+public class User {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String itemName;
-    private String itemCode;
-    private String itemDescription;
-    private Double itemPrice;
+    @Column(nullable = false, unique = true)
+    private String username;
+
+    @Column(nullable = false)
+    private String password;
+
+    private String role;
+
+    private String name;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    private String createdBy;
-    private String updatedBy;
 }

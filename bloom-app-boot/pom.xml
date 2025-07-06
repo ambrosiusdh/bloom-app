@@ -9,7 +9,7 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
 
-    <artifactId>bloom-app-main</artifactId>
+    <artifactId>bloom-app-boot</artifactId>
 
     <dependencies>
         <dependency>

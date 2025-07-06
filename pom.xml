@@ -23,7 +23,7 @@
     </developers>
 
     <modules>
-        <module>bloom-app-main</module>
+        <module>bloom-app-boot</module>
         <module>bloom-app-domain</module>
         <module>bloom-app-api</module>
         <module>bloom-app-service</module>

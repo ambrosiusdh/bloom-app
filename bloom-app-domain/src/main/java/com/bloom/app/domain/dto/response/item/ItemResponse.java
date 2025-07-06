@@ -1,4 +1,4 @@
-package com.bloom.app.dto.response.item;
+package com.bloom.app.domain.dto.response.item;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

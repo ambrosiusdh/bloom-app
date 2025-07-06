@@ -1,10 +1,8 @@
-package com.bloom.app.controller;
+package com.bloom.app.api.controller;
 
-import com.bloom.app.dto.request.item.CreateItemRequest;
-import com.bloom.app.dto.response.item.ItemResponse;
-import com.bloom.app.model.Item;
+import com.bloom.app.domain.dto.request.item.CreateItemRequest;
+import com.bloom.app.domain.dto.response.item.ItemResponse;
 import com.bloom.app.service.ItemService;
-import com.bloom.app.service.mapper.ItemMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;

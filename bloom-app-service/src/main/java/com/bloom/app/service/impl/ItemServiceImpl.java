@@ -1,8 +1,8 @@
 package com.bloom.app.service.impl;
 
-import com.bloom.app.dto.request.item.CreateItemRequest;
-import com.bloom.app.dto.response.item.ItemResponse;
-import com.bloom.app.model.Item;
+import com.bloom.app.domain.dto.request.item.CreateItemRequest;
+import com.bloom.app.domain.dto.response.item.ItemResponse;
+import com.bloom.app.domain.model.Item;
 import com.bloom.app.repository.ItemRepository;
 import com.bloom.app.service.ItemService;
 import com.bloom.app.service.mapper.ItemMapper;
