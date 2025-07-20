@@ -1,6 +1,7 @@
 package com.bloom.app.service.impl;
 
 import com.bloom.app.domain.dto.request.item.CreateItemRequest;
+import com.bloom.app.domain.dto.request.item.UpdateItemRequest;
 import com.bloom.app.domain.dto.response.item.ItemResponse;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.repository.ItemRepository;
@@ -30,7 +31,7 @@ public class ItemServiceImpl implements ItemService {
     }
 
     @Override
-    public Item updateItem(Item item) {
+    public ItemResponse updateItem(String sku, UpdateItemRequest request) {
         return null;
     }
 

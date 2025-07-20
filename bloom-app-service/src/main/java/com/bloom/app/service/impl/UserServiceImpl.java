@@ -69,4 +69,9 @@ public class UserServiceImpl implements UserService {
                 .map(userMapper::userToUserResponse)
                 .collect(Collectors.toList());
     }
+
+    @Override
+    public UserResponse findUserByUsername(String username) {
+        return null;
+    }
 }

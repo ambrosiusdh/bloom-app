@@ -11,6 +11,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @Builder
 public class UpdateItemRequest {
-    @NotBlank
-    private String itemCode;
+    private String name;
+    private String sku;
+    private String description;
+    private Double price;
+    private Integer stockQuantity;
 }

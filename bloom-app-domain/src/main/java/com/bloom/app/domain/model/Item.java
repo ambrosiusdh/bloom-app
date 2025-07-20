@@ -25,14 +25,11 @@ public class Item {
     private Double price;
     private Integer stockQuantity;
 
+    @Column(updatable = false)
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    @ManyToOne
-    @JoinColumn(name = "created_by")
-    private User createdBy;
-
-    @ManyToOne
-    @JoinColumn(name = "updated_by")
-    private User updatedBy;
+    @Column(updatable = false)
+    private String createdBy;
+    private String updatedBy;
 }

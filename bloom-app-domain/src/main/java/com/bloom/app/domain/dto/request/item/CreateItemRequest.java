@@ -23,5 +23,5 @@ public class CreateItemRequest {
     private Double price;
 
     @NotNull
-    private Integer quantity;
+    private Integer stockQuantity;
 }
