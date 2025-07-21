@@ -5,13 +5,22 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.Instant;
+
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
 public class ItemResponse {
-    private String itemCode;
-    private String itemName;
-    private String itemDescription;
-    private Double itemPrice;
+    private String name;
+    private String sku;
+    private String description;
+    private Double price;
+    private Integer stockQuantity;
+
+    private Instant createdAt;
+    private Instant updatedAt;
+
+    private String createdBy;
+    private String updatedBy;
 }

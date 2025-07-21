@@ -9,10 +9,13 @@ import com.bloom.app.domain.model.User;
 import com.bloom.app.repository.UserRepository;
 import com.bloom.app.service.UserService;
 import com.bloom.app.service.mapper.UserMapper;
+import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -25,7 +28,11 @@ public class UserServiceImpl implements UserService {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private BCryptPasswordEncoder bCryptPasswordEncoder;
 
+
+    @Transactional
     @Override
     public UserResponse createUser(CreateUserRequest request) {
         log.debug("UserService createUser using request: {}", request);
@@ -35,8 +42,10 @@ public class UserServiceImpl implements UserService {
         }
 
         User user = userMapper.createUserRequestToEntity(request);
-        userRepository.save(user);
-        return userMapper.userToUserResponse(user);
+        user.setPassword(bCryptPasswordEncoder.encode(request.getPassword()));
+
+        User savedUser = userRepository.save(user);
+        return userMapper.userToUserResponse(savedUser);
     }
 
     @Override
@@ -71,7 +80,9 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public UserResponse findUserByUsername(String username) {
-        return null;
+    public User findUserByUsername(String username) {
+        log.debug("UserService findUserByUsername using username: {}", username);
+        return userRepository.findByUsername(username)
+            .orElseThrow(() -> new UserNotFoundException(username));
     }
 }

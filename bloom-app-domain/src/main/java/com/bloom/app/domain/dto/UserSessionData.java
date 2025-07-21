@@ -1,21 +1,16 @@
-package com.bloom.app.domain.dto.response.user;
+package com.bloom.app.domain.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.Instant;
-
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
-public class UserResponse {
+public class UserSessionData {
     private String username;
-    private String role;
     private String name;
-
-    private Instant createdAt;
-    private Instant updatedAt;
+    private String role;
 }
