@@ -37,7 +37,7 @@ public class AuthController {
                 .build();
 
             request.getSession().setAttribute("currentUser", userSessionData);
-            return ResponseEntity.ok().build();
+            return ResponseEntity.ok().body(HttpStatus.OK);
         } catch (ServletException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(new ErrorResponse("Username or password is incorrect"));
@@ -45,10 +45,10 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout(HttpServletRequest request) throws ServletException {
+    public ResponseEntity<HttpStatus> logout(HttpServletRequest request) throws ServletException {
         request.logout();
         request.getSession().invalidate();
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok().body(HttpStatus.OK);
     }
 
     @GetMapping("/current")

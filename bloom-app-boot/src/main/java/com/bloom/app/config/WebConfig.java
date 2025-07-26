@@ -1,4 +1,4 @@
 package com.bloom.app.config;
 
-public class WebMvcConfig {
+public class WebConfig {
 }
