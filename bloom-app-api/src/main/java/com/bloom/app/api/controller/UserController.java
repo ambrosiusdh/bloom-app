@@ -1,12 +1,14 @@
 package com.bloom.app.api.controller;
 
+import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.domain.dto.request.user.CreateUserRequest;
 import com.bloom.app.domain.dto.request.user.UpdateUserRequest;
+import com.bloom.app.domain.dto.response.ApiResponse;
 import com.bloom.app.domain.dto.response.user.UserResponse;
 import com.bloom.app.service.UserService;
+import com.bloom.app.service.mapper.UserMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,6 +19,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class UserController {
     private final UserService userService;
+    private final UserMapper userMapper;
 
     @GetMapping
     public ResponseEntity<List<UserResponse>> getUsers() {
@@ -24,8 +27,8 @@ public class UserController {
     }
 
     @PostMapping
-    public ResponseEntity<UserResponse> createUser(@RequestBody @Valid CreateUserRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(userService.createUser(request));
+    public ResponseEntity<ApiResponse<UserResponse>> createUser(@RequestBody @Valid CreateUserRequest request) {
+        return ResponseHelper.created("User created", userService.createUser(request));
     }
 
     @PutMapping("/{username}")

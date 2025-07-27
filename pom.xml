@@ -25,9 +25,10 @@
     <modules>
         <module>bloom-app-boot</module>
         <module>bloom-app-domain</module>
-        <module>bloom-app-api</module>
         <module>bloom-app-service</module>
         <module>bloom-app-persistence</module>
+        <module>bloom-app-validation</module>
+        <module>bloom-app-api</module>
     </modules>
 
     <scm>
@@ -40,10 +41,27 @@
         <java.version>21</java.version>
         <mapstruct.version>1.5.5.Final</mapstruct.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-core</artifactId>
+                <version>9.22.3</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.flywaydb</groupId>
+                    <artifactId>flyway-core</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

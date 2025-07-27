@@ -15,7 +15,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -41,7 +40,7 @@ public class UserServiceImpl implements UserService {
             throw new UsernameAlreadyExistsException(request.getUsername());
         }
 
-        User user = userMapper.createUserRequestToEntity(request);
+        User user = userMapper.toUserEntity(request);
         user.setPassword(bCryptPasswordEncoder.encode(request.getPassword()));
 
         User savedUser = userRepository.save(user);

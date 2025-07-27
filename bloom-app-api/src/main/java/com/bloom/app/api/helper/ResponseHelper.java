@@ -16,4 +16,8 @@ public class ResponseHelper {
     public static <T> ResponseEntity<ApiResponse<T>> badRequest(String message) {
         return ResponseEntity.badRequest().body(ApiResponse.fail(message, 400));
     }
+
+    public static <T> ResponseEntity<ApiResponse<T>> unauthorizedRequest(String message) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResponse.fail(message, 401));
+    }
 }

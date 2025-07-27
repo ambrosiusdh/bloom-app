@@ -1,4 +1,4 @@
-package com.bloom.app.specification;
+package com.bloom.app.service.specification;
 
 import com.bloom.app.domain.dto.request.item.FilterItemRequest;
 import com.bloom.app.domain.model.Item;

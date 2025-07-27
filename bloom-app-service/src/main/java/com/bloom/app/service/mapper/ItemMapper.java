@@ -12,8 +12,8 @@ import org.mapstruct.NullValuePropertyMappingStrategy;
 public interface ItemMapper {
     ItemResponse itemToItemResponse(Item item);
 
-    Item createItemRequestToEntity(CreateItemRequest request);
+    Item createRequestToEntity(CreateItemRequest request);
 
-    void updateItemRequestToEntity(UpdateItemRequest request, @MappingTarget Item item);
+    void updateRequestToEntity(UpdateItemRequest request, @MappingTarget Item item);
 
 }

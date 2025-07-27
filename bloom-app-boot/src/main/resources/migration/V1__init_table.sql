@@ -1,4 +1,4 @@
-CREATE TABLE item (
+CREATE TABLE items (
       id BIGSERIAL PRIMARY KEY,
       name VARCHAR(255),
       sku VARCHAR(100),
@@ -12,7 +12,7 @@ CREATE TABLE item (
       updated_by VARCHAR(255)
 );
 
-CREATE TABLE sale (
+CREATE TABLE sales (
       id BIGSERIAL PRIMARY KEY,
       code VARCHAR(100),
       total_amount NUMERIC(19, 2),
@@ -24,18 +24,18 @@ CREATE TABLE sale (
       updated_by VARCHAR(255)
 );
 
-CREATE TABLE sale_item (
+CREATE TABLE sale_items (
        id BIGSERIAL PRIMARY KEY,
-       sale_id BIGINT REFERENCES sale(id) ON DELETE CASCADE,
-       item_id BIGINT REFERENCES item(id),
+       sale_id BIGINT REFERENCES sales(id) ON DELETE CASCADE,
+       item_id BIGINT REFERENCES items(id),
        quantity INTEGER,
        unit_price NUMERIC(19, 2),
        subtotal NUMERIC(19, 2)
 );
 
-CREATE TABLE stock_adjustment (
+CREATE TABLE stock_adjustments (
       id BIGSERIAL PRIMARY KEY,
-      item_id BIGINT REFERENCES item(id),
+      item_id BIGINT REFERENCES items(id),
       code VARCHAR(100),
       quantity_change INTEGER,
       reason TEXT,

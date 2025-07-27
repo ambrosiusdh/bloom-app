@@ -8,4 +8,6 @@ import java.util.Optional;
 
 public interface ItemRepository extends JpaRepository<Item, Long>, JpaSpecificationExecutor<Item> {
     Optional<Item> findItemBySku(String sku);
+
+    boolean existsBySku(String sku);
 }
