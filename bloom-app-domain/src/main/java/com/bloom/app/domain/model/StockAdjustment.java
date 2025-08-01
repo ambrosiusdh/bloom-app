@@ -23,12 +23,13 @@ import java.time.LocalDateTime;
 @Table(name = "stock_adjustments")
 public class StockAdjustment {
     @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @ManyToOne
     private Item item;
 
+    @Column(nullable = false, unique = true)
     private String code;
     private Integer quantityChange;
     private String reason;

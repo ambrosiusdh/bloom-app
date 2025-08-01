@@ -1,6 +1,7 @@
 package com.bloom.app.repository;
 
 import com.bloom.app.domain.model.Item;
+import com.bloom.app.domain.model.ItemCategory;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
@@ -10,4 +11,8 @@ public interface ItemRepository extends JpaRepository<Item, Long>, JpaSpecificat
     Optional<Item> findItemBySku(String sku);
 
     boolean existsBySku(String sku);
+
+    long countByCategoryAndActiveTrue(ItemCategory category);
+
+    long countByCategory(ItemCategory category);
 }

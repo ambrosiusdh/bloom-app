@@ -9,18 +9,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ItemSpecification {
-    public static Specification<Item> filter(FilterItemRequest filter) {
+    public static Specification<Item> filter(FilterItemRequest request) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
             predicates.add(cb.isTrue(root.get("active")));
 
-            if (filter.getName() != null && !filter.getName().isEmpty()) {
-                predicates.add(cb.like(cb.lower(root.get("name")), "%" + filter.getName().toLowerCase() + "%"));
+            if (request.getName() != null && !request.getName().isEmpty()) {
+                predicates.add(cb.like(cb.lower(root.get("name")), "%" + request.getName().toLowerCase() + "%"));
             }
 
-            if (filter.getSku() != null && !filter.getSku().isEmpty()) {
-                predicates.add(cb.like(cb.lower(root.get("sku")), "%" + filter.getSku().toLowerCase() + "%"));
+            if (request.getSku() != null && !request.getSku().isEmpty()) {
+                predicates.add(cb.like(cb.lower(root.get("sku")), "%" + request.getSku().toLowerCase() + "%"));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));

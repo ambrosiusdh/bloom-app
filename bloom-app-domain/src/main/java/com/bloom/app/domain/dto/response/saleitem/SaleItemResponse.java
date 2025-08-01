@@ -1,6 +1,6 @@
-package com.bloom.app.domain.model;
+package com.bloom.app.domain.dto.response.saleitem;
 
-import jakarta.persistence.*;
+import com.bloom.app.domain.dto.response.item.ItemResponse;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -12,19 +12,8 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
-@Entity
-@Table(name = "sale_items")
-public class SaleItem {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne
-    private Sale sale;
-
-    @ManyToOne
-    private Item item;
-
+public class SaleItemResponse {
+    private ItemResponse item;
     private Integer quantity;
     private BigDecimal unitPrice;
     private BigDecimal subtotal;

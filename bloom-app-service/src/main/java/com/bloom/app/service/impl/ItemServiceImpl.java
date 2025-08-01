@@ -4,11 +4,15 @@ import com.bloom.app.domain.dto.request.item.CreateItemRequest;
 import com.bloom.app.domain.dto.request.item.FilterItemRequest;
 import com.bloom.app.domain.dto.request.item.UpdateItemRequest;
 import com.bloom.app.domain.dto.response.item.ItemResponse;
+import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.model.Item;
+import com.bloom.app.domain.model.ItemCategory;
+import com.bloom.app.repository.ItemCategoryRepository;
 import com.bloom.app.repository.ItemRepository;
 import com.bloom.app.service.ItemService;
 import com.bloom.app.service.mapper.ItemMapper;
 import com.bloom.app.service.specification.ItemSpecification;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -22,21 +26,22 @@ import java.util.List;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ItemServiceImpl implements ItemService {
-    @Autowired
-    private ItemRepository itemRepository;
-
-    @Autowired
-    private ItemMapper itemMapper;
+    private final ItemRepository itemRepository;
+    private final ItemCategoryRepository itemCategoryRepository;
+    private final ItemMapper itemMapper;
 
     @Override
     public ItemResponse createItem(CreateItemRequest request) {
         log.debug("ItemService createItem using request: {}", request);
-        if (itemRepository.existsBySku(request.getSku())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Item sku already exists");
-        }
+        ItemCategory itemCategory = itemCategoryRepository.findByCode(request.getCategoryCode())
+            .orElseThrow(() -> new ResponseStatusException(ErrorCode.ITEM_CATEGORY_NOT_FOUND.getStatus(), ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()));
+        String sku = generateNextSku(itemCategory);
 
         Item item = itemMapper.createRequestToEntity(request);
+        item.setCategory(itemCategory);
+        item.setSku(sku);
         item.setActive(true);
         return itemMapper.itemToItemResponse(itemRepository.save(item));
     }
@@ -77,5 +82,10 @@ public class ItemServiceImpl implements ItemService {
         return itemRepository.findItemBySku(sku)
             .map(itemMapper::itemToItemResponse)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Item not found"));
+    }
+
+    private String generateNextSku(ItemCategory itemCategory) {
+        long currentSkuCount = itemRepository.countByCategory(itemCategory);
+        return String.format("%s-%05d", itemCategory.getCode(), currentSkuCount + 1);
     }
 }

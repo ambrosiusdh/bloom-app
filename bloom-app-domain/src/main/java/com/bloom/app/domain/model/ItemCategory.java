@@ -1,6 +1,12 @@
 package com.bloom.app.domain.model;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -14,32 +20,21 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.time.Instant;
 
 @Data
-@NoArgsConstructor
 @AllArgsConstructor
+@NoArgsConstructor
 @Builder
 @Entity
 @EntityListeners(AuditingEntityListener.class)
-@Table(
-    name = "items",
-    indexes = {
-        @Index(name = "idx_items_category_id", columnList = "category_id")
-    }
-)
-public class Item {
+@Table(name = "item_categories")
+public class ItemCategory {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    private String code;
     private String name;
-    private String sku;
     private String description;
-    private Double price;
-    private Integer stockQuantity;
     private boolean active;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "item_category_id", nullable = false)
-    private ItemCategory category;
 
     @Column(updatable = false)
     @CreatedDate

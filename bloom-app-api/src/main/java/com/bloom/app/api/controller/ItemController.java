@@ -8,7 +8,6 @@ import com.bloom.app.domain.dto.request.item.UpdateItemRequest;
 import com.bloom.app.domain.dto.response.ApiResponse;
 import com.bloom.app.domain.dto.response.item.ItemResponse;
 import com.bloom.app.service.ItemService;
-import com.bloom.app.service.mapper.ItemMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -28,7 +27,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class ItemController {
     private final ItemService itemService;
-    private final ItemMapper itemMapper;
 
     @GetMapping
     public ResponseEntity<ApiResponse<Page<ItemResponse>>> filterItems(
