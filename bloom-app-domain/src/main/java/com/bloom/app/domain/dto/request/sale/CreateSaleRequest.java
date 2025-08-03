@@ -1,6 +1,7 @@
 package com.bloom.app.domain.dto.request.sale;
 
 import com.bloom.app.domain.dto.request.saleitem.CreateSaleItemRequest;
+import com.bloom.app.domain.enums.PaymentType;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -18,6 +19,12 @@ public class CreateSaleRequest {
     @NotNull
     private BigDecimal discountAmount;
 
+    @NotNull
+    private BigDecimal paidAmount;
+
     private String description = "";
     private List<CreateSaleItemRequest> saleItemList;
+
+    @NotNull
+    private PaymentType paymentType;
 }

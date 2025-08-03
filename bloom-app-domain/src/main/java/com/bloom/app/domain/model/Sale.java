@@ -1,5 +1,6 @@
 package com.bloom.app.domain.model;
 
+import com.bloom.app.domain.enums.PaymentType;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -13,7 +14,6 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
@@ -30,9 +30,15 @@ public class Sale {
 
     @Column(nullable = false, unique = true)
     private String code;
-    private BigDecimal totalAmount;
+    private BigDecimal subtotalAmount;
     private BigDecimal discountAmount;
+    private BigDecimal totalAmount;
+    private BigDecimal paidAmount;
     private String description;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private PaymentType paymentType;
 
     @Column(updatable = false)
     @CreatedDate

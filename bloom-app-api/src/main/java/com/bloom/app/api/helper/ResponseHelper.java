@@ -20,4 +20,12 @@ public class ResponseHelper {
     public static <T> ResponseEntity<ApiResponse<T>> unauthorizedRequest(String message) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiResponse.fail(message, 401));
     }
+
+    public static <T> ResponseEntity<ApiResponse<T>> notFound(String message) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.fail(message, 404));
+    }
+
+    public static <T> ResponseEntity<ApiResponse<T>> error(String message) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.fail(message, 500));
+    }
 }

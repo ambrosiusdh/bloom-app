@@ -3,8 +3,8 @@ package com.bloom.app.service.impl;
 import com.bloom.app.domain.dto.request.sale.CreateSaleRequest;
 import com.bloom.app.domain.dto.request.sale.FilterSaleRequest;
 import com.bloom.app.domain.dto.request.saleitem.CreateSaleItemRequest;
-import com.bloom.app.domain.dto.response.item.ItemResponse;
 import com.bloom.app.domain.dto.response.sale.SaleResponse;
+import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.SaleItem;
@@ -12,7 +12,6 @@ import com.bloom.app.repository.ItemRepository;
 import com.bloom.app.repository.SaleRepository;
 import com.bloom.app.service.SaleService;
 import com.bloom.app.service.mapper.SaleMapper;
-import com.bloom.app.service.specification.ItemSpecification;
 import com.bloom.app.service.specification.SaleSpecification;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -26,7 +25,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -80,7 +78,15 @@ public class SaleServiceImpl implements SaleService {
         BigDecimal discount = Optional.ofNullable(request.getDiscountAmount()).orElse(BigDecimal.ZERO);
         sale.setCode(generateMonthlySaleCode());
         sale.setItems(saleItems);
-        sale.setTotalAmount(discount);
+        sale.setPaymentType(request.getPaymentType());
+        sale.setSubtotalAmount(total);
+        sale.setDiscountAmount(discount);
+        sale.setTotalAmount(total.subtract(discount));
+        sale.setPaidAmount(request.getPaidAmount());
+
+        if (sale.getPaidAmount().compareTo(sale.getTotalAmount()) < 0) {
+            throw new ResponseStatusException(ErrorCode.SALE_PAID_LESS_THAN_TOTAL.getStatus(), ErrorCode.SALE_PAID_LESS_THAN_TOTAL.getMessage());
+        }
 
         return saleMapper.saleToResponse(saleRepository.save(sale));
     }

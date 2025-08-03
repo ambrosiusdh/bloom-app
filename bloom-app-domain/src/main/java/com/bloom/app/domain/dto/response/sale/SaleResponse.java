@@ -1,6 +1,7 @@
 package com.bloom.app.domain.dto.response.sale;
 
 import com.bloom.app.domain.dto.response.saleitem.SaleItemResponse;
+import com.bloom.app.domain.enums.PaymentType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -16,8 +17,11 @@ import java.util.List;
 @Builder
 public class SaleResponse {
     private String code;
-    private BigDecimal totalAmount;
+    private BigDecimal subtotalAmount;
     private BigDecimal discountAmount;
+    private BigDecimal totalAmount;
+    private BigDecimal paidAmount;
+    private PaymentType paymentType;
     private String description;
     private Instant createdAt;
     private Instant updatedAt;

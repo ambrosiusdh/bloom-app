@@ -1,6 +1,6 @@
 package com.bloom.app.config;
 
-import com.bloom.app.config.properties.CorsProperties;
+import com.bloom.app.domain.properties.CorsProperties;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;

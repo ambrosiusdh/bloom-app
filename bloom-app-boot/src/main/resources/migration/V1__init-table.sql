@@ -31,9 +31,12 @@ CREATE INDEX idx_item_category_id ON items(item_category_id);
 CREATE TABLE sales (
       id BIGSERIAL PRIMARY KEY,
       code VARCHAR(100) UNIQUE,
-      total_amount NUMERIC(19, 2),
+      subtotal_amount NUMERIC(19, 2),
       discount_amount NUMERIC(19, 2),
+      total_amount NUMERIC(19, 2),
+      paid_amount NUMERIC(19, 2),
       description TEXT,
+      payment_type VARCHAR(50) NOT NULL,
       created_at TIMESTAMP,
       updated_at TIMESTAMP,
       created_by VARCHAR(255),
