@@ -15,12 +15,23 @@ public class ItemSpecification {
 
             predicates.add(cb.isTrue(root.get("active")));
 
-            if (request.getName() != null && !request.getName().isEmpty()) {
-                predicates.add(cb.like(cb.lower(root.get("name")), "%" + request.getName().toLowerCase() + "%"));
+            if (request.getSkuOrName() != null && !request.getSkuOrName().isEmpty()) {
+                predicates.add(cb.or(
+                    cb.like(cb.lower(root.get("sku")), "%" + request.getSkuOrName().toLowerCase() + "%"),
+                    cb.like(cb.lower(root.get("name")), "%" + request.getSkuOrName().toLowerCase() + "%")
+                ));
+            } else {
+                if (request.getName() != null && !request.getName().isEmpty()) {
+                    predicates.add(cb.like(cb.lower(root.get("name")), "%" + request.getName().toLowerCase() + "%"));
+                }
+
+                if (request.getSku() != null && !request.getSku().isEmpty()) {
+                    predicates.add(cb.like(cb.lower(root.get("sku")), "%" + request.getSku().toLowerCase() + "%"));
+                }
             }
 
-            if (request.getSku() != null && !request.getSku().isEmpty()) {
-                predicates.add(cb.like(cb.lower(root.get("sku")), "%" + request.getSku().toLowerCase() + "%"));
+            if (request.getCategory() != null && !request.getCategory().isEmpty()) {
+                predicates.add(cb.equal(root.get("category").get("code"), request.getCategory()));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));

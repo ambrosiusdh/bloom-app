@@ -12,4 +12,6 @@ import lombok.NoArgsConstructor;
 public class FilterItemRequest {
     private String sku;
     private String name;
+    private String category;
+    private String skuOrName;
 }
