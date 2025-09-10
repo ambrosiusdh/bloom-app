@@ -8,6 +8,7 @@ import com.bloom.app.domain.dto.request.itemcategory.UpdateItemCategoryRequest;
 import com.bloom.app.domain.dto.response.ApiResponse;
 import com.bloom.app.domain.dto.response.itemcategory.ItemCategoryResponse;
 import com.bloom.app.service.ItemCategoryService;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -28,31 +29,60 @@ import org.springframework.web.bind.annotation.RestController;
 public class ItemCategoryController {
     private final ItemCategoryService itemCategoryService;
 
+
     @GetMapping
+    @Operation(summary = "Filter Item Category")
     public ResponseEntity<ApiResponse<Page<ItemCategoryResponse>>> filterItemCategory(
         FilterItemCategoryRequest request,
-        Pageable pageable) {
+        Pageable pageable
+    ) {
         Page<ItemCategoryResponse> response = itemCategoryService.filterItemCategory(request, PagingHelper.toPageRequest(pageable));
         return ResponseHelper.ok(response);
     }
 
+    @GetMapping(path = "/{code}")
+    @Operation(
+        summary = "Get item category details",
+        description = "Fetch details of a specific item category using its code."
+    )
+    public ResponseEntity<ApiResponse<ItemCategoryResponse>> getItemCategoryDetails(@PathVariable String code) {
+        ItemCategoryResponse response = itemCategoryService.getItemCategoryDetails(code);
+        return ResponseHelper.ok(response);
+    }
+
     @PostMapping
-    public ResponseEntity<ApiResponse<ItemCategoryResponse>> createItemCategory(@Valid @RequestBody CreateItemCategoryRequest request) {
+    @Operation(
+        summary = "Create a new item category",
+        description = "Create and register a new item category with the provided details."
+    )
+    public ResponseEntity<ApiResponse<ItemCategoryResponse>> createItemCategory(
+        @Valid @RequestBody CreateItemCategoryRequest request
+    ) {
         ItemCategoryResponse response = itemCategoryService.createItemCategory(request);
         return ResponseHelper.ok(response);
     }
 
     @PutMapping(path = "/{code}")
+    @Operation(
+        summary = "Update item category",
+        description = "Update an existing item category identified by its code."
+    )
     public ResponseEntity<ApiResponse<ItemCategoryResponse>> updateItemCategory(
-        UpdateItemCategoryRequest request,
-        @PathVariable String code) {
+        @RequestBody UpdateItemCategoryRequest request,
+        @PathVariable String code
+    ) {
         ItemCategoryResponse response = itemCategoryService.updateItemCategory(request, code);
         return ResponseHelper.ok(response);
     }
 
     @PatchMapping(path = "/{code}")
+    @Operation(
+        summary = "Deactivate item category",
+        description = "Mark an item category as inactive without deleting it from the system."
+    )
     public ResponseEntity<ApiResponse<Boolean>> deactivateItemCategory(@PathVariable String code) {
         Boolean response = itemCategoryService.deactivateItemCategory(code);
         return ResponseHelper.ok(response);
     }
+
 }

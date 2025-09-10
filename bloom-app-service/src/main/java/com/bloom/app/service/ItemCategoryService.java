@@ -10,6 +10,7 @@ import org.springframework.data.domain.Pageable;
 public interface ItemCategoryService {
     ItemCategoryResponse createItemCategory(CreateItemCategoryRequest request);
     Page<ItemCategoryResponse> filterItemCategory(FilterItemCategoryRequest request, Pageable pageable);
+    ItemCategoryResponse getItemCategoryDetails(String code);
     ItemCategoryResponse updateItemCategory(UpdateItemCategoryRequest request, String code);
     Boolean deactivateItemCategory(String code);
 }

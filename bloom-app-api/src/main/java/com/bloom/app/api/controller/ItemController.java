@@ -8,6 +8,8 @@ import com.bloom.app.domain.dto.request.item.UpdateItemRequest;
 import com.bloom.app.domain.dto.response.ApiResponse;
 import com.bloom.app.domain.dto.response.item.ItemResponse;
 import com.bloom.app.service.ItemService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -29,40 +31,62 @@ public class ItemController {
     private final ItemService itemService;
 
     @GetMapping
+    @Operation(
+        summary = "Filter and list items",
+        description = "Retrieve a paginated list of items based on filter criteria (category, name, stock, etc.)."
+    )
     public ResponseEntity<ApiResponse<Page<ItemResponse>>> filterItems(
-        FilterItemRequest request,
-        Pageable pageable
+        @Parameter(description = "Filter parameters for item search") FilterItemRequest request,
+        @Parameter(description = "Pagination and sorting information") Pageable pageable
     ) {
         Page<ItemResponse> response = itemService.filterItems(request, PagingHelper.toPageRequest(pageable));
         return ResponseHelper.ok(response);
     }
 
     @GetMapping(path = "/{sku}")
+    @Operation(
+        summary = "Get item details",
+        description = "Fetch detailed information about a single item using its SKU."
+    )
     public ResponseEntity<ApiResponse<ItemResponse>> getItemDetails(
-        @PathVariable String sku
+        @Parameter(description = "The unique SKU of the item") @PathVariable String sku
     ) {
         ItemResponse response = itemService.getItemDetails(sku);
         return ResponseHelper.ok(response);
     }
 
     @PostMapping
-    public ResponseEntity<ApiResponse<ItemResponse>> createItem(@Valid @RequestBody CreateItemRequest request) {
+    @Operation(
+        summary = "Create a new item",
+        description = "Add a new item into the system with the provided details."
+    )
+    public ResponseEntity<ApiResponse<ItemResponse>> createItem(
+        @Valid @RequestBody CreateItemRequest request
+    ) {
         ItemResponse response = itemService.createItem(request);
         return ResponseHelper.ok(response);
     }
 
     @PutMapping(path = "/{sku}")
+    @Operation(
+        summary = "Update an item",
+        description = "Update the details of an existing item identified by its SKU."
+    )
     public ResponseEntity<ApiResponse<ItemResponse>> updateItem(
-            @PathVariable String sku,
-            @Valid @RequestBody UpdateItemRequest request
+        @Parameter(description = "The SKU of the item to update") @PathVariable String sku,
+        @Valid @RequestBody UpdateItemRequest request
     ) {
         ItemResponse response = itemService.updateItem(sku, request);
         return ResponseHelper.ok(response);
     }
 
     @PatchMapping(path = "/{sku}")
+    @Operation(
+        summary = "Deactivate an item",
+        description = "Mark an item as inactive using its SKU without deleting it from the system."
+    )
     public ResponseEntity<ApiResponse<Boolean>> deactivateItem(
-        @PathVariable String sku
+        @Parameter(description = "The SKU of the item to deactivate") @PathVariable String sku
     ) {
         itemService.deactivateItem(sku);
         return ResponseHelper.ok(Boolean.TRUE);

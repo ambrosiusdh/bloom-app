@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -47,19 +48,27 @@ public class ItemCategoryServiceImpl implements ItemCategoryService {
 
         Page<ItemCategory> itemCategoryPage = itemCategoryRepository.findAll(ItemCategorySpecification.filter(request), pageable);
         List<ItemCategoryResponse> itemCategoryResponseList = itemCategoryPage.getContent()
-            .stream()
-            .map(itemCategoryMapper::entityToResponse)
-            .toList();
+                .stream()
+                .map(itemCategoryMapper::entityToResponse)
+                .toList();
 
         return new PageImpl<>(itemCategoryResponseList, pageable, itemCategoryPage.getTotalElements());
     }
 
     @Override
-    public ItemCategoryResponse updateItemCategory(UpdateItemCategoryRequest request,  String code) {
+    public ItemCategoryResponse getItemCategoryDetails(String code) {
+        log.debug("ItemCategoryService getItemCategoryDetails with code: {}", code);
+        return itemCategoryRepository.findByCode(code)
+                .map(itemCategoryMapper::entityToResponse)
+                .orElseThrow(() -> new ResponseStatusException(ErrorCode.ITEM_CATEGORY_NOT_FOUND.getStatus(), ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()));
+    }
+
+    @Override
+    public ItemCategoryResponse updateItemCategory(UpdateItemCategoryRequest request, String code) {
         log.debug("ItemCategoryService updateItemCategory with request: {}", request);
 
         ItemCategory itemCategory = itemCategoryRepository.findByCode(code)
-            .orElseThrow(() -> new ResponseStatusException(ErrorCode.ITEM_CATEGORY_NOT_FOUND.getStatus(), ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()));
+                .orElseThrow(() -> new ResponseStatusException(ErrorCode.ITEM_CATEGORY_NOT_FOUND.getStatus(), ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()));
         itemCategoryMapper.copyUpdateRequestToEntity(request, itemCategory);
         return itemCategoryMapper.entityToResponse(itemCategoryRepository.save(itemCategory));
     }
@@ -68,7 +77,7 @@ public class ItemCategoryServiceImpl implements ItemCategoryService {
     public Boolean deactivateItemCategory(String code) {
         log.debug("ItemCategoryService deactivateItemCategory with code: {}", code);
         ItemCategory itemCategory = itemCategoryRepository.findByCode(code)
-            .orElseThrow(() -> new ResponseStatusException(ErrorCode.ITEM_CATEGORY_NOT_FOUND.getStatus(), ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()));
+                .orElseThrow(() -> new ResponseStatusException(ErrorCode.ITEM_CATEGORY_NOT_FOUND.getStatus(), ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()));
         if (itemRepository.countByCategoryAndActiveTrue(itemCategory) > 0) {
             throw new ResponseStatusException(ErrorCode.ITEM_CATEGORY_HAS_ACTIVE_ITEM.getStatus(), ErrorCode.ITEM_CATEGORY_HAS_ACTIVE_ITEM.getMessage());
         }
