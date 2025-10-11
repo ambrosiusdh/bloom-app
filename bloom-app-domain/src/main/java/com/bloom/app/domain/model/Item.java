@@ -31,7 +31,10 @@ public class Item {
     private Long id;
 
     private String name;
+
+    @Column(unique = true, nullable = false)
     private String sku;
+
     private String description;
     private Double price;
     private Integer stockQuantity;

@@ -3,8 +3,10 @@ package com.bloom.app.service.impl;
 import com.bloom.app.domain.dto.request.itemcategory.CreateItemCategoryRequest;
 import com.bloom.app.domain.dto.request.itemcategory.FilterItemCategoryRequest;
 import com.bloom.app.domain.dto.request.itemcategory.UpdateItemCategoryRequest;
+import com.bloom.app.domain.dto.response.itemcategory.ItemCategoryItemCountResponse;
 import com.bloom.app.domain.dto.response.itemcategory.ItemCategoryResponse;
 import com.bloom.app.domain.error.ErrorCode;
+import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
 import com.bloom.app.repository.ItemCategoryRepository;
 import com.bloom.app.repository.ItemRepository;
@@ -78,12 +80,27 @@ public class ItemCategoryServiceImpl implements ItemCategoryService {
         log.debug("ItemCategoryService deactivateItemCategory with code: {}", code);
         ItemCategory itemCategory = itemCategoryRepository.findByCode(code)
                 .orElseThrow(() -> new ResponseStatusException(ErrorCode.ITEM_CATEGORY_NOT_FOUND.getStatus(), ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()));
-        if (itemRepository.countByCategoryAndActiveTrue(itemCategory) > 0) {
-            throw new ResponseStatusException(ErrorCode.ITEM_CATEGORY_HAS_ACTIVE_ITEM.getStatus(), ErrorCode.ITEM_CATEGORY_HAS_ACTIVE_ITEM.getMessage());
-        }
+        List<Item> itemList = itemRepository.findAllByCategory(itemCategory).stream()
+            .peek(item -> item.setActive(false))
+            .toList();
 
         itemCategory.setActive(false);
         itemCategoryRepository.save(itemCategory);
+        itemRepository.saveAll(itemList);
         return Boolean.TRUE;
+    }
+
+    @Override
+    public ItemCategoryItemCountResponse getItemCategoryItemCount(String code) {
+        log.debug("ItemCategoryService getItemCategoryItemCount with code: {}", code);
+        ItemCategory itemCategory = itemCategoryRepository.findByCode(code)
+            .orElseThrow(() -> new ResponseStatusException(ErrorCode.ITEM_CATEGORY_NOT_FOUND.getStatus(), ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()));
+
+        long itemCount = itemRepository.countByCategoryAndActiveTrue(itemCategory);
+
+        return ItemCategoryItemCountResponse.builder()
+            .code(code)
+            .itemCount(itemCount)
+            .build();
     }
 }

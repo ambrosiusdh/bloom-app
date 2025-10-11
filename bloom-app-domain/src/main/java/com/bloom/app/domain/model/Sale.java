@@ -30,6 +30,7 @@ public class Sale {
 
     @Column(nullable = false, unique = true)
     private String code;
+
     private BigDecimal subtotalAmount;
     private BigDecimal discountAmount;
     private BigDecimal totalAmount;

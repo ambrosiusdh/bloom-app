@@ -6,6 +6,7 @@ import com.bloom.app.domain.dto.request.itemcategory.CreateItemCategoryRequest;
 import com.bloom.app.domain.dto.request.itemcategory.FilterItemCategoryRequest;
 import com.bloom.app.domain.dto.request.itemcategory.UpdateItemCategoryRequest;
 import com.bloom.app.domain.dto.response.ApiResponse;
+import com.bloom.app.domain.dto.response.itemcategory.ItemCategoryItemCountResponse;
 import com.bloom.app.domain.dto.response.itemcategory.ItemCategoryResponse;
 import com.bloom.app.service.ItemCategoryService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -78,10 +79,20 @@ public class ItemCategoryController {
     @PatchMapping(path = "/{code}")
     @Operation(
         summary = "Deactivate item category",
-        description = "Mark an item category as inactive without deleting it from the system."
+        description = "Mark an item category as inactive together with the item registered with specified category without deleting it from the system."
     )
     public ResponseEntity<ApiResponse<Boolean>> deactivateItemCategory(@PathVariable String code) {
         Boolean response = itemCategoryService.deactivateItemCategory(code);
+        return ResponseHelper.ok(response);
+    }
+
+    @GetMapping(path = "/{code}/items/count")
+    @Operation(
+        summary = "Get item category's item count",
+        description = "Get count of item with specified category"
+    )
+    public ResponseEntity<ApiResponse<ItemCategoryItemCountResponse>> getItemCategoryItemCount(@PathVariable String code) {
+        ItemCategoryItemCountResponse response =  itemCategoryService.getItemCategoryItemCount(code);
         return ResponseHelper.ok(response);
     }
 

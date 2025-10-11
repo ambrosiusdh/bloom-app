@@ -42,7 +42,6 @@ public class ItemServiceImpl implements ItemService {
         Item item = itemMapper.createRequestToEntity(request);
         item.setCategory(itemCategory);
         item.setSku(sku);
-        item.setActive(true);
         return itemMapper.itemToItemResponse(itemRepository.save(item));
     }
 

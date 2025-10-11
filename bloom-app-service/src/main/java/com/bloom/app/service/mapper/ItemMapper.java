@@ -18,6 +18,7 @@ public interface ItemMapper {
     @Mapping(target = "category", source = "category")
     ItemResponse itemToItemResponse(Item item);
 
+    @Mapping(target = "active", expression = "java(true)")
     Item createRequestToEntity(CreateItemRequest request);
 
     void updateRequestToEntity(UpdateItemRequest request, @MappingTarget Item item);
