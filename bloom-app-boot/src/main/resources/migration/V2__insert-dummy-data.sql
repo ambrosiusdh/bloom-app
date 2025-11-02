@@ -15,3 +15,9 @@ VALUES
 
 INSERT INTO users (username, password, role, name, created_at, updated_at, created_by, updated_by)
 VALUES ('admin', '$2a$12$y1sAyuZ237dP7nFW.hwShe9UT9lfxALNRUhfp9WmD2/ARa1P6gjxa', 'admin', 'Admin', now(), now(), 'SYSTEM', 'SYSTEM')
+
+SELECT setval('items_id_seq', (SELECT MAX(id) FROM items));
+
+SELECT setval('item_categories_id_seq', (SELECT MAX(id) FROM item_categories));
+
+SELECT setval('users_id_seq', (SELECT MAX(id) FROM users));
