@@ -13,6 +13,7 @@ import java.time.Instant;
 @Builder
 public class FilterSaleRequest {
     private String code;
+    private String createdBy;
     private Instant startDate;
     private Instant endDate;
 }

@@ -4,6 +4,7 @@ import com.bloom.app.domain.dto.request.sale.CreateSaleRequest;
 import com.bloom.app.domain.dto.request.sale.FilterSaleRequest;
 import com.bloom.app.domain.dto.request.saleitem.CreateSaleItemRequest;
 import com.bloom.app.domain.dto.response.sale.SaleResponse;
+import com.bloom.app.domain.enums.RomanMonth;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Sale;
@@ -25,6 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -117,15 +119,19 @@ public class SaleServiceImpl implements SaleService {
     public String generateMonthlySaleCode() {
         YearMonth currentMonth = YearMonth.now();
         int month = currentMonth.getMonthValue();
+        String romanMonth = RomanMonth.fromNumber(month);
         int year = currentMonth.getYear();
         ZoneId zoneId = ZoneId.systemDefault();
 
         Instant startOfMonth = currentMonth.atDay(1).atStartOfDay(zoneId).toInstant();
-        Instant endOfMonth = currentMonth.atEndOfMonth().atTime(23, 59, 59).atZone(zoneId).toInstant();
+        Instant endOfMonth = currentMonth.atEndOfMonth()
+            .atTime(LocalTime.MAX)
+            .atZone(zoneId)
+            .toInstant();
 
         long count = saleRepository.countByCreatedAtBetween(startOfMonth, endOfMonth);
         long nextSequence = count + 1;
 
-        return String.format("SALE/%02d-%d/%04d", month, year, nextSequence);
+        return String.format("SALE/%s-%d/%04d", romanMonth, year, nextSequence);
     }
 }

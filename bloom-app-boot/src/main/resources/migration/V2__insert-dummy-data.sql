@@ -14,7 +14,7 @@ VALUES
     ('Tameng Kapten Indonesia', 'LNN-00002', 'kena pajak, jadi ga ada lagi', 9.00, 10, false, 3, now(), 'admin');
 
 INSERT INTO users (username, password, role, name, created_at, updated_at, created_by, updated_by)
-VALUES ('admin', '$2a$12$y1sAyuZ237dP7nFW.hwShe9UT9lfxALNRUhfp9WmD2/ARa1P6gjxa', 'admin', 'Admin', now(), now(), 'SYSTEM', 'SYSTEM')
+VALUES ('admin', '$2a$12$y1sAyuZ237dP7nFW.hwShe9UT9lfxALNRUhfp9WmD2/ARa1P6gjxa', 'admin', 'Admin', now(), now(), 'SYSTEM', 'SYSTEM');
 
 SELECT setval('items_id_seq', (SELECT MAX(id) FROM items));
 

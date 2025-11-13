@@ -17,6 +17,10 @@ public class SaleSpecification {
                 predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("code")), "%" + request.getCode().toLowerCase() + "%"));
             }
 
+            if (request.getCreatedBy() != null && !request.getCreatedBy().isEmpty()) {
+                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("createdBy")), "%" + request.getCreatedBy().toLowerCase() + "%"));
+            }
+
             if (request.getStartDate() != null) {
                 predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("createdAt"), request.getStartDate()));
             }
