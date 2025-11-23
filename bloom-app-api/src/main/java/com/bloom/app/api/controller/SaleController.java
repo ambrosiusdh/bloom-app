@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -42,8 +43,8 @@ public class SaleController {
        return ResponseHelper.ok(response);
     }
 
-    @GetMapping(path = "/{code}")
-    public ResponseEntity<ApiResponse<SaleResponse>> getSaleDetails(@PathVariable String code) {
+    @GetMapping(path = "/details")
+    public ResponseEntity<ApiResponse<SaleResponse>> getSaleDetails(@RequestParam String code) {
        SaleResponse response = saleService.getSaleDetails(code);
        return ResponseHelper.ok(response);
     }
