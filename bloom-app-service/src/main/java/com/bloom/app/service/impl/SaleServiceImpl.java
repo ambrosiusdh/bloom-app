@@ -11,6 +11,7 @@ import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.SaleItem;
 import com.bloom.app.repository.ItemRepository;
 import com.bloom.app.repository.SaleRepository;
+import com.bloom.app.service.ExcelExportService;
 import com.bloom.app.service.SaleService;
 import com.bloom.app.service.mapper.SaleMapper;
 import com.bloom.app.service.specification.SaleSpecification;
@@ -24,6 +25,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalTime;
@@ -32,6 +34,8 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @Slf4j
 @Service
@@ -40,6 +44,7 @@ public class SaleServiceImpl implements SaleService {
     private final SaleRepository saleRepository;
     private final ItemRepository itemRepository;
     private final SaleMapper saleMapper;
+    private final ExcelExportService excelExportService;
 
     @Override
     @Transactional
@@ -55,7 +60,8 @@ public class SaleServiceImpl implements SaleService {
 
         for (CreateSaleItemRequest itemRequest : request.getSaleItemList()) {
             Item item = itemRepository.findItemBySku(itemRequest.getItemSku())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Item not found: " + itemRequest.getItemSku()));
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Item not found: " + itemRequest.getItemSku()));
 
             if (item.getStockQuantity() < itemRequest.getQuantity()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cart quantity is more than stock quantity");
@@ -65,12 +71,12 @@ public class SaleServiceImpl implements SaleService {
             BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(itemRequest.getQuantity()));
 
             SaleItem saleItem = SaleItem.builder()
-                .item(item)
-                .quantity(itemRequest.getQuantity())
-                .unitPrice(unitPrice)
-                .subtotal(subtotal)
-                .sale(sale)
-                .build();
+                    .item(item)
+                    .quantity(itemRequest.getQuantity())
+                    .unitPrice(unitPrice)
+                    .subtotal(subtotal)
+                    .sale(sale)
+                    .build();
 
             saleItems.add(saleItem);
             total = total.add(subtotal);
@@ -87,7 +93,8 @@ public class SaleServiceImpl implements SaleService {
         sale.setPaidAmount(request.getPaidAmount());
 
         if (sale.getPaidAmount().compareTo(sale.getTotalAmount()) < 0) {
-            throw new ResponseStatusException(ErrorCode.SALE_PAID_LESS_THAN_TOTAL.getStatus(), ErrorCode.SALE_PAID_LESS_THAN_TOTAL.getMessage());
+            throw new ResponseStatusException(ErrorCode.SALE_PAID_LESS_THAN_TOTAL.getStatus(),
+                    ErrorCode.SALE_PAID_LESS_THAN_TOTAL.getMessage());
         }
 
         return saleMapper.saleToResponse(saleRepository.save(sale));
@@ -100,9 +107,9 @@ public class SaleServiceImpl implements SaleService {
         Page<Sale> salePage = saleRepository.findAll(SaleSpecification.filter(request), pageable);
 
         List<SaleResponse> saleResponseList = salePage.getContent()
-            .stream()
-            .map(saleMapper::saleToResponse)
-            .toList();
+                .stream()
+                .map(saleMapper::saleToResponse)
+                .toList();
 
         return new PageImpl<>(saleResponseList, pageable, salePage.getTotalElements());
     }
@@ -111,9 +118,40 @@ public class SaleServiceImpl implements SaleService {
     public SaleResponse getSaleDetails(String code) {
         log.debug("SaleService getSaleDetails with code: {}", code);
         Sale sale = saleRepository.findByCode(code)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sales not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sales not found"));
 
         return saleMapper.saleToResponse(sale);
+    }
+
+    @Override
+    public void exportSale(String code, java.io.OutputStream outputStream) {
+        log.debug("SaleService exportSale with code: {}", code);
+        Sale sale = saleRepository.findByCode(code)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sale not found"));
+
+        SaleResponse saleResponse = saleMapper.saleToResponse(sale);
+        excelExportService.exportSaleToExcel(saleResponse, outputStream);
+    }
+
+    @Override
+    public void exportSalesBulk(FilterSaleRequest request, java.io.OutputStream outputStream) {
+        log.debug("SaleService exportSalesBulk with request: {}", request);
+        List<Sale> sales = saleRepository.findAll(SaleSpecification.filter(request));
+
+        try (ZipOutputStream zos = new ZipOutputStream(outputStream)) {
+            for (Sale sale : sales) {
+                SaleResponse saleResponse = saleMapper.saleToResponse(sale);
+                String filename = String.format("Sale-%s.xlsx", sale.getCode().replaceAll("[/\\\\]", "-"));
+                ZipEntry entry = new ZipEntry(filename);
+                zos.putNextEntry(entry);
+                excelExportService.exportSaleToExcel(saleResponse, zos);
+                zos.closeEntry();
+            }
+            zos.finish();
+        } catch (IOException e) {
+            log.error("Failed to export sales bulk", e);
+            throw new RuntimeException("Failed to export sales bulk", e);
+        }
     }
 
     public String generateMonthlySaleCode() {
@@ -125,9 +163,9 @@ public class SaleServiceImpl implements SaleService {
 
         Instant startOfMonth = currentMonth.atDay(1).atStartOfDay(zoneId).toInstant();
         Instant endOfMonth = currentMonth.atEndOfMonth()
-            .atTime(LocalTime.MAX)
-            .atZone(zoneId)
-            .toInstant();
+                .atTime(LocalTime.MAX)
+                .atZone(zoneId)
+                .toInstant();
 
         long count = saleRepository.countByCreatedAtBetween(startOfMonth, endOfMonth);
         long nextSequence = count + 1;

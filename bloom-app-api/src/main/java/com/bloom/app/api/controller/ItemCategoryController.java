@@ -30,7 +30,6 @@ import org.springframework.web.bind.annotation.RestController;
 public class ItemCategoryController {
     private final ItemCategoryService itemCategoryService;
 
-
     @GetMapping
     @Operation(summary = "Filter Item Category")
     public ResponseEntity<ApiResponse<Page<ItemCategoryResponse>>> filterItemCategory(

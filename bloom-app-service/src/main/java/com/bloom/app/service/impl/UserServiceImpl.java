@@ -10,6 +10,7 @@ import com.bloom.app.repository.UserRepository;
 import com.bloom.app.service.UserService;
 import com.bloom.app.service.mapper.UserMapper;
 import jakarta.transaction.Transactional;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -19,16 +20,12 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Slf4j
+@RequiredArgsConstructor
 @Service
 public class UserServiceImpl implements UserService {
-    @Autowired
-    private UserMapper userMapper;
-
-    @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
-    private BCryptPasswordEncoder bCryptPasswordEncoder;
+    private final UserMapper userMapper;
+    private final UserRepository userRepository;
+    private final BCryptPasswordEncoder bCryptPasswordEncoder;
 
 
     @Transactional
@@ -52,7 +49,7 @@ public class UserServiceImpl implements UserService {
         log.debug("UserService updateUser using request: {}", request);
 
         User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new UserNotFoundException(username));
+            .orElseThrow(() -> new UserNotFoundException(username));
 
         userMapper.updateUserRequestToEntity(request, user);
         userRepository.save(user);
@@ -64,7 +61,7 @@ public class UserServiceImpl implements UserService {
         log.debug("UserService deleteUser using request: {}", username);
 
         User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new UserNotFoundException(username));
+            .orElseThrow(() -> new UserNotFoundException(username));
 
         userRepository.delete(user);
     }
@@ -74,8 +71,8 @@ public class UserServiceImpl implements UserService {
         log.debug("UserService getUsers");
         List<User> users = userRepository.findAll();
         return users.stream()
-                .map(userMapper::userToUserResponse)
-                .collect(Collectors.toList());
+            .map(userMapper::userToUserResponse)
+            .collect(Collectors.toList());
     }
 
     @Override
@@ -85,3 +82,4 @@ public class UserServiceImpl implements UserService {
             .orElseThrow(() -> new UserNotFoundException(username));
     }
 }
+
