@@ -1,27 +1,20 @@
 package com.bloom.app.domain.dto.request.stockadjustment;
 
 import com.bloom.app.domain.enums.StockAdjustmentSource;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.List;
+import java.time.Instant;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CreateStockAdjustmentRequest {
-    @NotNull
+public class FilterStockAdjustmentRequest {
+    private String stockAdjustmentCode;
     private StockAdjustmentSource source;
-
-    private String reason;
-
-    @NotEmpty
-    @Valid
-    private List<StockAdjustmentItemRequest> items;
+    private Instant startDate;
+    private Instant endDate;
 }
