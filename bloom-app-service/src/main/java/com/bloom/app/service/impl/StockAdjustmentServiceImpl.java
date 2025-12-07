@@ -5,15 +5,13 @@ import com.bloom.app.domain.dto.request.stockadjustment.FilterStockAdjustmentReq
 import com.bloom.app.domain.dto.request.stockadjustment.StockAdjustmentItemRequest;
 import com.bloom.app.domain.dto.response.stockadjustment.CsvParseResponse;
 import com.bloom.app.domain.dto.response.stockadjustment.StockAdjustmentResponse;
-import com.bloom.app.domain.enums.RomanMonth;
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.model.Item;
-import com.bloom.app.domain.model.ItemAuditLog;
 import com.bloom.app.domain.model.StockAdjustment;
 import com.bloom.app.domain.model.StockAdjustmentItem;
-import com.bloom.app.repository.ItemAuditLogRepository;
 import com.bloom.app.repository.ItemRepository;
 import com.bloom.app.repository.StockAdjustmentRepository;
+import com.bloom.app.service.CounterService;
 import com.bloom.app.service.StockAdjustmentService;
 import com.bloom.app.service.mapper.StockAdjustmentMapper;
 import com.bloom.app.service.specification.StockAdjustmentSpecification;
@@ -37,11 +35,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.PrintWriter;
-import java.time.Instant;
-import java.time.LocalTime;
-import java.time.YearMonth;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -51,9 +44,9 @@ import java.util.List;
 public class StockAdjustmentServiceImpl implements StockAdjustmentService {
     private final StockAdjustmentRepository stockAdjustmentRepository;
     private final ItemRepository itemRepository;
-    // ItemAuditLogRepository removed as it is handled by StockMovementService
     private final StockAdjustmentMapper stockAdjustmentMapper;
     private final StockMovementService stockMovementService;
+    private final CounterService counterService;
 
     @Override
     @Transactional
@@ -61,7 +54,7 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
         log.debug("StockAdjustmentService createStockAdjustment with request: {}", request);
 
         StockAdjustment stockAdjustment = stockAdjustmentMapper.createRequestToEntity(request);
-        stockAdjustment.setStockAdjustmentCode(generateStockAdjustmentCode());
+        stockAdjustment.setStockAdjustmentCode(counterService.generateNextCode("STOCK_ADJUSTMENT", "SA"));
 
         List<StockAdjustmentItem> stockAdjustmentItems = new ArrayList<>();
 
@@ -85,9 +78,6 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 newStock = previousStock;
             }
 
-            // item.setStockQuantity(newStock); // Handled by StockMovementService
-            // itemRepository.save(item); // Handled by StockMovementService
-
             StockAdjustmentItem stockAdjustmentItem = StockAdjustmentItem.builder()
                     .stockAdjustment(stockAdjustment)
                     .item(item)
@@ -98,8 +88,6 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                     .build();
 
             stockAdjustmentItems.add(stockAdjustmentItem);
-
-            // ItemAuditLog creation delegated to StockMovementService
         }
 
         stockAdjustment.setItems(stockAdjustmentItems);
@@ -232,24 +220,5 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
             log.error("Failed to generate Excel template", e);
             throw new RuntimeException("Failed to generate Excel template", e);
         }
-    }
-
-    private String generateStockAdjustmentCode() {
-        YearMonth currentMonth = YearMonth.now();
-        int month = currentMonth.getMonthValue();
-        String romanMonth = RomanMonth.fromNumber(month);
-        int year = currentMonth.getYear();
-        ZoneId zoneId = ZoneId.systemDefault();
-
-        Instant startOfMonth = currentMonth.atDay(1).atStartOfDay(zoneId).toInstant();
-        Instant endOfMonth = currentMonth.atEndOfMonth()
-                .atTime(LocalTime.MAX)
-                .atZone(zoneId)
-                .toInstant();
-
-        long count = stockAdjustmentRepository.countByCreatedAtBetween(startOfMonth, endOfMonth);
-        long nextSequence = count + 1;
-
-        return String.format("ADJ/%s-%d/%04d", romanMonth, year, nextSequence);
     }
 }

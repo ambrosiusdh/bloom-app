@@ -4,13 +4,13 @@ import com.bloom.app.domain.dto.request.sale.CreateSaleRequest;
 import com.bloom.app.domain.dto.request.sale.FilterSaleRequest;
 import com.bloom.app.domain.dto.request.saleitem.CreateSaleItemRequest;
 import com.bloom.app.domain.dto.response.sale.SaleResponse;
-import com.bloom.app.domain.enums.RomanMonth;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.SaleItem;
 import com.bloom.app.repository.ItemRepository;
 import com.bloom.app.repository.SaleRepository;
+import com.bloom.app.service.CounterService;
 import com.bloom.app.service.ExcelExportService;
 import com.bloom.app.service.SaleService;
 import com.bloom.app.service.mapper.SaleMapper;
@@ -27,10 +27,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.time.Instant;
-import java.time.LocalTime;
-import java.time.YearMonth;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -48,6 +44,7 @@ public class SaleServiceImpl implements SaleService {
     private final SaleMapper saleMapper;
     private final ExcelExportService excelExportService;
     private final StockMovementService stockMovementService;
+    private final CounterService counterService;
 
     @Override
     @Transactional
@@ -86,9 +83,8 @@ public class SaleServiceImpl implements SaleService {
         }
 
         BigDecimal discount = Optional.ofNullable(request.getDiscountAmount()).orElse(BigDecimal.ZERO);
-        sale.setCode(generateMonthlySaleCode());
+        sale.setCode(counterService.generateNextCode("SALE", "SALE"));
 
-        sale.setCode(generateMonthlySaleCode());
         sale.setItems(saleItems);
         sale.setPaymentType(request.getPaymentType());
         sale.setSubtotalAmount(total);
@@ -159,24 +155,5 @@ public class SaleServiceImpl implements SaleService {
             log.error("Failed to export sales bulk", e);
             throw new RuntimeException("Failed to export sales bulk", e);
         }
-    }
-
-    public String generateMonthlySaleCode() {
-        YearMonth currentMonth = YearMonth.now();
-        int month = currentMonth.getMonthValue();
-        String romanMonth = RomanMonth.fromNumber(month);
-        int year = currentMonth.getYear();
-        ZoneId zoneId = ZoneId.systemDefault();
-
-        Instant startOfMonth = currentMonth.atDay(1).atStartOfDay(zoneId).toInstant();
-        Instant endOfMonth = currentMonth.atEndOfMonth()
-                .atTime(LocalTime.MAX)
-                .atZone(zoneId)
-                .toInstant();
-
-        long count = saleRepository.countByCreatedAtBetween(startOfMonth, endOfMonth);
-        long nextSequence = count + 1;
-
-        return String.format("SALE/%s-%d/%04d", romanMonth, year, nextSequence);
     }
 }

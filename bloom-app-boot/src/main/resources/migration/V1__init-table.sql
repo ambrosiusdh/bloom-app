@@ -45,6 +45,9 @@ CREATE TABLE sales (
       updated_by VARCHAR(255)
 );
 
+CREATE INDEX idx_sales_code ON sales(code);
+CREATE INDEX idx_sales_created_at ON sales(created_at);
+
 CREATE TABLE sale_items (
        id BIGSERIAL PRIMARY KEY,
        sale_id BIGINT REFERENCES sales(id) ON DELETE CASCADE,
@@ -123,4 +126,33 @@ CREATE TABLE stock_movements (
 
 CREATE INDEX idx_stock_movements_product_id ON stock_movements(product_id);
 CREATE INDEX idx_stock_movements_source ON stock_movements(source_type, source_id);
-CREATE INDEX idx_stock_movements_created_at ON stock_movements(created_at);
+
+CREATE TABLE counters (
+    id BIGSERIAL PRIMARY KEY,
+    document_type VARCHAR(50) NOT NULL,
+    year INTEGER NOT NULL,
+    month INTEGER NOT NULL,
+    current_sequence BIGINT NOT NULL,
+    UNIQUE(document_type, year, month)
+);
+
+CREATE TABLE goods_receipts (
+    id BIGSERIAL PRIMARY KEY,
+    code VARCHAR(100) UNIQUE NOT NULL,
+    received_date TIMESTAMP NOT NULL,
+    supplier_name VARCHAR(255),
+    description TEXT,
+    created_at TIMESTAMP NOT NULL,
+    created_by VARCHAR(255)
+);
+
+CREATE TABLE goods_receipt_items (
+    id BIGSERIAL PRIMARY KEY,
+    goods_receipt_id BIGINT NOT NULL,
+    item_id BIGINT NOT NULL,
+    quantity INTEGER NOT NULL,
+    CONSTRAINT fk_goods_receipt_items_receipt FOREIGN KEY (goods_receipt_id) REFERENCES goods_receipts(id) ON DELETE CASCADE,
+    CONSTRAINT fk_goods_receipt_items_item FOREIGN KEY (item_id) REFERENCES items(id)
+);
+
+CREATE INDEX idx_goods_receipt_items_receipt_id ON goods_receipt_items(goods_receipt_id);

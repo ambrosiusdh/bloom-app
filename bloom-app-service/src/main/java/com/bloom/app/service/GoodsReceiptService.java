@@ -1,0 +1,14 @@
+package com.bloom.app.service;
+
+import com.bloom.app.domain.dto.request.goodsreceipt.CreateGoodsReceiptRequest;
+import com.bloom.app.domain.dto.response.goodsreceipt.GoodsReceiptResponse;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
+public interface GoodsReceiptService {
+    GoodsReceiptResponse createGoodsReceipt(CreateGoodsReceiptRequest request);
+
+    GoodsReceiptResponse getGoodsReceiptDetails(String code);
+
+    Page<GoodsReceiptResponse> getGoodsReceipts(Pageable pageable);
+}

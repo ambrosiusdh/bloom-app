@@ -15,8 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.List;
-
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -151,7 +149,7 @@ public class StockMovementService {
 
             if (qty > 0) { // Only record if there is a change
                 recordMovement(
-                        MovementSourceType.MANUAL_ADJUSTMENT,
+                        MovementSourceType.STOCK_ADJUSTMENT,
                         adjustment.getId(),
                         item.getItem(),
                         qty,
