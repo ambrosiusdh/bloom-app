@@ -37,11 +37,7 @@ import java.util.Optional;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-import com.bloom.app.domain.dto.request.stockadjustment.CreateStockAdjustmentRequest;
-import com.bloom.app.domain.dto.request.stockadjustment.StockAdjustmentItemRequest;
-import com.bloom.app.domain.enums.StockAdjustmentActionType;
-import com.bloom.app.domain.enums.StockAdjustmentSource;
-import com.bloom.app.service.StockAdjustmentService;
+import com.bloom.app.service.StockMovementService;
 
 @Slf4j
 @Service
@@ -51,7 +47,7 @@ public class SaleServiceImpl implements SaleService {
     private final ItemRepository itemRepository;
     private final SaleMapper saleMapper;
     private final ExcelExportService excelExportService;
-    private final StockAdjustmentService stockAdjustmentService;
+    private final StockMovementService stockMovementService;
 
     @Override
     @Transactional
@@ -59,7 +55,6 @@ public class SaleServiceImpl implements SaleService {
         log.debug("SaleService createSale with request: {}", request);
         Sale sale = saleMapper.createRequestToEntity(request);
         List<SaleItem> saleItems = new ArrayList<>();
-        List<StockAdjustmentItemRequest> stockAdjustmentItems = new ArrayList<>();
         BigDecimal total = BigDecimal.ZERO;
 
         if (request.getSaleItemList() == null || request.getSaleItemList().isEmpty()) {
@@ -88,24 +83,12 @@ public class SaleServiceImpl implements SaleService {
 
             saleItems.add(saleItem);
             total = total.add(subtotal);
-
-            // Prepare stock adjustment item
-            stockAdjustmentItems.add(StockAdjustmentItemRequest.builder()
-                    .itemSku(item.getSku())
-                    .changeQuantity(itemRequest.getQuantity())
-                    .actionType(StockAdjustmentActionType.REMOVE)
-                    .build());
         }
 
         BigDecimal discount = Optional.ofNullable(request.getDiscountAmount()).orElse(BigDecimal.ZERO);
         sale.setCode(generateMonthlySaleCode());
 
-        // Trigger Stock Adjustment
-        CreateStockAdjustmentRequest stockAdjustmentRequest = CreateStockAdjustmentRequest.builder()
-                .source(StockAdjustmentSource.SALE)
-                .reason("Sale Transaction: " + sale.getCode())
-                .items(stockAdjustmentItems)
-                .build();
+        sale.setCode(generateMonthlySaleCode());
         sale.setItems(saleItems);
         sale.setPaymentType(request.getPaymentType());
         sale.setSubtotalAmount(total);
@@ -119,7 +102,7 @@ public class SaleServiceImpl implements SaleService {
         }
 
         Sale savedSale = saleRepository.save(sale);
-        stockAdjustmentService.createStockAdjustment(stockAdjustmentRequest);
+        stockMovementService.recordSaleMovements(savedSale);
 
         return saleMapper.saleToResponse(savedSale);
     }

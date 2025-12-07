@@ -46,7 +46,7 @@ public class AuditLogServiceImpl implements AuditLogService {
         // Let's use specification for flexibility or add a method in repo.
         // Since ItemAuditLog has Item, and Item has SKU.
         // Let's update repository to find by Item_Sku.
-        return itemAuditLogRepository.findByItemSku(sku, pageable)
+        return itemAuditLogRepository.findByItem_Sku(sku, pageable)
                 .map(itemAuditLogMapper::toResponse);
     }
 }

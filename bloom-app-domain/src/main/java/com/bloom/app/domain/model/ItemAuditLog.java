@@ -29,7 +29,7 @@ import java.time.Instant;
 @Table(name = "item_audit_logs")
 public class ItemAuditLog {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)

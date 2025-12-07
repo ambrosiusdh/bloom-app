@@ -25,7 +25,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "stock_adjustment_items")
 public class StockAdjustmentItem {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)

@@ -17,6 +17,7 @@ import com.bloom.app.repository.StockAdjustmentRepository;
 import com.bloom.app.service.StockAdjustmentService;
 import com.bloom.app.service.mapper.StockAdjustmentMapper;
 import com.bloom.app.service.specification.StockAdjustmentSpecification;
+import com.bloom.app.service.StockMovementService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,8 +51,9 @@ import java.util.List;
 public class StockAdjustmentServiceImpl implements StockAdjustmentService {
     private final StockAdjustmentRepository stockAdjustmentRepository;
     private final ItemRepository itemRepository;
-    private final ItemAuditLogRepository itemAuditLogRepository;
+    // ItemAuditLogRepository removed as it is handled by StockMovementService
     private final StockAdjustmentMapper stockAdjustmentMapper;
+    private final StockMovementService stockMovementService;
 
     @Override
     @Transactional
@@ -76,9 +78,6 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 newStock = previousStock + changeQuantity;
             } else if (itemRequest.getActionType() == StockAdjustmentActionType.REMOVE) {
                 newStock = previousStock - changeQuantity;
-            } else if (itemRequest.getActionType() == StockAdjustmentActionType.ADJUST) {
-                newStock = previousStock + changeQuantity; // Adjust can be positive or negative, assuming input is
-                                                           // delta
             } else if (itemRequest.getActionType() == StockAdjustmentActionType.CORRECTION) {
                 newStock = changeQuantity; // Correction sets the absolute value
                 changeQuantity = newStock - previousStock; // Calculate delta
@@ -86,8 +85,8 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 newStock = previousStock;
             }
 
-            item.setStockQuantity(newStock);
-            itemRepository.save(item);
+            // item.setStockQuantity(newStock); // Handled by StockMovementService
+            // itemRepository.save(item); // Handled by StockMovementService
 
             StockAdjustmentItem stockAdjustmentItem = StockAdjustmentItem.builder()
                     .stockAdjustment(stockAdjustment)
@@ -100,22 +99,14 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
 
             stockAdjustmentItems.add(stockAdjustmentItem);
 
-            ItemAuditLog auditLog = ItemAuditLog.builder()
-                    .item(item)
-                    .actionType(itemRequest.getActionType())
-                    .qty(changeQuantity)
-                    .qtyBefore(previousStock)
-                    .qtyAfter(newStock)
-                    .source(request.getSource())
-                    .referenceNo(stockAdjustment.getStockAdjustmentCode())
-                    .createdBy(stockAdjustment.getCreatedBy())
-                    .build();
-
-            itemAuditLogRepository.save(auditLog);
+            // ItemAuditLog creation delegated to StockMovementService
         }
 
         stockAdjustment.setItems(stockAdjustmentItems);
         StockAdjustment savedStockAdjustment = stockAdjustmentRepository.save(stockAdjustment);
+
+        // Trigger generic movement logic
+        stockMovementService.recordManualAdjustment(savedStockAdjustment);
 
         return stockAdjustmentMapper.toResponse(savedStockAdjustment);
     }

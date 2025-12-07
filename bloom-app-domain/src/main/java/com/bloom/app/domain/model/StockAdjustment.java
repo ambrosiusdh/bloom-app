@@ -28,7 +28,7 @@ import java.util.List;
 @Table(name = "stock_adjustments")
 public class StockAdjustment {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE)
     private Long id;
 
     @Column(name = "stock_adjustment_code", nullable = false, unique = true)
