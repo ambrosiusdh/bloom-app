@@ -1,15 +1,15 @@
 package com.bloom.app.service.impl;
 
-import com.bloom.app.domain.dto.request.itemcategory.CreateItemCategoryRequest;
-import com.bloom.app.domain.dto.request.itemcategory.FilterItemCategoryRequest;
-import com.bloom.app.domain.dto.request.itemcategory.UpdateItemCategoryRequest;
-import com.bloom.app.domain.dto.response.itemcategory.ItemCategoryItemCountResponse;
-import com.bloom.app.domain.dto.response.itemcategory.ItemCategoryResponse;
+import com.bloom.app.api.dto.request.itemcategory.CreateItemCategoryRequest;
+import com.bloom.app.api.dto.request.itemcategory.FilterItemCategoryRequest;
+import com.bloom.app.api.dto.request.itemcategory.UpdateItemCategoryRequest;
+import com.bloom.app.api.dto.response.itemcategory.ItemCategoryItemCountResponse;
+import com.bloom.app.api.dto.response.itemcategory.ItemCategoryResponse;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
-import com.bloom.app.repository.ItemCategoryRepository;
-import com.bloom.app.repository.ItemRepository;
+import com.bloom.app.persistence.repository.ItemCategoryRepository;
+import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.service.ItemCategoryService;
 import com.bloom.app.service.mapper.ItemCategoryMapper;
 import com.bloom.app.service.specification.ItemCategorySpecification;
@@ -18,7 +18,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 

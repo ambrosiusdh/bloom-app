@@ -16,7 +16,7 @@ import java.math.BigDecimal;
 @Table(name = "sale_items")
 public class SaleItem {
     @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @ManyToOne

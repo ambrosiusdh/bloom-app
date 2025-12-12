@@ -1,6 +1,6 @@
 package com.bloom.app.service.specification;
 
-import com.bloom.app.domain.dto.request.stockadjustment.FilterStockAdjustmentRequest;
+import com.bloom.app.api.dto.request.stockadjustment.FilterStockAdjustmentRequest;
 import com.bloom.app.domain.model.StockAdjustment;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.jpa.domain.Specification;
@@ -16,10 +16,6 @@ public class StockAdjustmentSpecification {
             if (request.getStockAdjustmentCode() != null && !request.getStockAdjustmentCode().isEmpty()) {
                 predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("stockAdjustmentCode")),
                         "%" + request.getStockAdjustmentCode().toLowerCase() + "%"));
-            }
-
-            if (request.getSource() != null) {
-                predicates.add(criteriaBuilder.equal(root.get("source"), request.getSource()));
             }
 
             if (request.getStartDate() != null) {

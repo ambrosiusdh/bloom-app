@@ -1,6 +1,6 @@
 package com.bloom.app.service.mapper;
 
-import com.bloom.app.domain.dto.response.stockadjustment.StockAdjustmentItemResponse;
+import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentItemResponse;
 import com.bloom.app.domain.model.StockAdjustmentItem;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;

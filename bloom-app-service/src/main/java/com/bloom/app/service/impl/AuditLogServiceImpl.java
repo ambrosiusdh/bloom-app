@@ -1,9 +1,9 @@
 package com.bloom.app.service.impl;
 
-import com.bloom.app.domain.dto.request.auditlog.FilterAuditLogRequest;
-import com.bloom.app.domain.dto.response.auditlog.ItemAuditLogResponse;
+import com.bloom.app.api.dto.request.auditlog.FilterAuditLogRequest;
+import com.bloom.app.api.dto.response.auditlog.ItemAuditLogResponse;
 import com.bloom.app.domain.model.ItemAuditLog;
-import com.bloom.app.repository.ItemAuditLogRepository;
+import com.bloom.app.persistence.repository.ItemAuditLogRepository;
 import com.bloom.app.service.AuditLogService;
 import com.bloom.app.service.mapper.ItemAuditLogMapper;
 import com.bloom.app.service.specification.ItemAuditLogSpecification;

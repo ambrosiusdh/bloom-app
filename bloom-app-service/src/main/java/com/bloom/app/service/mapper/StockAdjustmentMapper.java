@@ -1,7 +1,7 @@
 package com.bloom.app.service.mapper;
 
-import com.bloom.app.domain.dto.request.stockadjustment.CreateStockAdjustmentRequest;
-import com.bloom.app.domain.dto.response.stockadjustment.StockAdjustmentResponse;
+import com.bloom.app.api.dto.request.stockadjustment.CreateStockAdjustmentRequest;
+import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
 import com.bloom.app.domain.model.StockAdjustment;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;

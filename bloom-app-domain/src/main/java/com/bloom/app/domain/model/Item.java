@@ -27,7 +27,7 @@ import java.time.Instant;
 )
 public class Item {
     @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     private String name;
@@ -55,4 +55,7 @@ public class Item {
     private String createdBy;
     @LastModifiedBy
     private String updatedBy;
+
+    @Version
+    private long version;
 }

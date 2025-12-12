@@ -7,6 +7,5 @@ public enum MovementSourceType {
     STOCK_OPNAME,
     PURCHASE,
     RETURN,
-    TRANSFER,
-    CSV_UPLOAD
+    TRANSFER
 }

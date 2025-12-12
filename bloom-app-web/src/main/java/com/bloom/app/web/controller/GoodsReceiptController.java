@@ -1,9 +1,9 @@
 package com.bloom.app.web.controller;
 
 import com.bloom.app.api.helper.ResponseHelper;
-import com.bloom.app.domain.dto.request.goodsreceipt.CreateGoodsReceiptRequest;
-import com.bloom.app.domain.dto.response.ApiResponse;
-import com.bloom.app.domain.dto.response.goodsreceipt.GoodsReceiptResponse;
+import com.bloom.app.api.dto.request.goodsreceipt.CreateGoodsReceiptRequest;
+import com.bloom.app.api.dto.response.ApiResponse;
+import com.bloom.app.api.dto.response.goodsreceipt.GoodsReceiptResponse;
 import com.bloom.app.service.GoodsReceiptService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;

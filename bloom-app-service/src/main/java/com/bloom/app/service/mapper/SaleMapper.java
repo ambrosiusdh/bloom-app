@@ -1,7 +1,7 @@
 package com.bloom.app.service.mapper;
 
-import com.bloom.app.domain.dto.request.sale.CreateSaleRequest;
-import com.bloom.app.domain.dto.response.sale.SaleResponse;
+import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
+import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.service.SaleItemMapper;
 import org.mapstruct.Mapper;

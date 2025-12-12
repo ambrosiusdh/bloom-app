@@ -29,6 +29,7 @@
         <module>bloom-app-persistence</module>
         <module>bloom-app-validation</module>
         <module>bloom-app-api</module>
+        <module>bloom-app-web</module>
     </modules>
 
     <scm>

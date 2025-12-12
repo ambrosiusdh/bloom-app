@@ -1,6 +1,6 @@
 package com.bloom.app.service.specification;
 
-import com.bloom.app.domain.dto.request.auditlog.FilterAuditLogRequest;
+import com.bloom.app.api.dto.request.auditlog.FilterAuditLogRequest;
 import com.bloom.app.domain.model.ItemAuditLog;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.jpa.domain.Specification;
@@ -19,10 +19,6 @@ public class ItemAuditLogSpecification {
 
             if (request.getActionType() != null) {
                 predicates.add(criteriaBuilder.equal(root.get("actionType"), request.getActionType()));
-            }
-
-            if (request.getSource() != null) {
-                predicates.add(criteriaBuilder.equal(root.get("source"), request.getSource()));
             }
 
             if (request.getReferenceNo() != null && !request.getReferenceNo().isEmpty()) {

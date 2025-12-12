@@ -1,6 +1,6 @@
 package com.bloom.app.service.specification;
 
-import com.bloom.app.domain.dto.request.sale.FilterSaleRequest;
+import com.bloom.app.api.dto.request.sale.FilterSaleRequest;
 import com.bloom.app.domain.model.Sale;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.jpa.domain.Specification;

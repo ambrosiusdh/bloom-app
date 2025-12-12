@@ -28,7 +28,7 @@ import java.time.Instant;
 @Table(name = "item_categories")
 public class ItemCategory {
     @Id
-    @GeneratedValue(strategy = GenerationType.SEQUENCE)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(unique = true, nullable = false)

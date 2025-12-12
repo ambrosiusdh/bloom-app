@@ -1,20 +1,19 @@
 package com.bloom.app.service.impl;
 
-import com.bloom.app.domain.dto.request.item.CreateItemRequest;
-import com.bloom.app.domain.dto.request.item.FilterItemRequest;
-import com.bloom.app.domain.dto.request.item.UpdateItemRequest;
-import com.bloom.app.domain.dto.response.item.ItemResponse;
+import com.bloom.app.api.dto.request.item.CreateItemRequest;
+import com.bloom.app.api.dto.request.item.FilterItemRequest;
+import com.bloom.app.api.dto.request.item.UpdateItemRequest;
+import com.bloom.app.api.dto.response.item.ItemResponse;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
-import com.bloom.app.repository.ItemCategoryRepository;
-import com.bloom.app.repository.ItemRepository;
+import com.bloom.app.persistence.repository.ItemCategoryRepository;
+import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.service.ItemService;
 import com.bloom.app.service.mapper.ItemMapper;
 import com.bloom.app.service.specification.ItemSpecification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;

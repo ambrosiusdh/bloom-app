@@ -1,7 +1,7 @@
 package com.bloom.app.service;
 
-import com.bloom.app.domain.dto.request.auditlog.FilterAuditLogRequest;
-import com.bloom.app.domain.dto.response.auditlog.ItemAuditLogResponse;
+import com.bloom.app.api.dto.request.auditlog.FilterAuditLogRequest;
+import com.bloom.app.api.dto.response.auditlog.ItemAuditLogResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 

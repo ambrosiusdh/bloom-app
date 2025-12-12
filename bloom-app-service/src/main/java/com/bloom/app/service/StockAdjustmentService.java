@@ -1,9 +1,9 @@
 package com.bloom.app.service;
 
-import com.bloom.app.domain.dto.request.stockadjustment.CreateStockAdjustmentRequest;
-import com.bloom.app.domain.dto.request.stockadjustment.FilterStockAdjustmentRequest;
-import com.bloom.app.domain.dto.response.stockadjustment.CsvParseResponse;
-import com.bloom.app.domain.dto.response.stockadjustment.StockAdjustmentResponse;
+import com.bloom.app.api.dto.request.stockadjustment.CreateStockAdjustmentRequest;
+import com.bloom.app.api.dto.request.stockadjustment.FilterStockAdjustmentRequest;
+import com.bloom.app.api.dto.response.stockadjustment.CsvParseResponse;
+import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;

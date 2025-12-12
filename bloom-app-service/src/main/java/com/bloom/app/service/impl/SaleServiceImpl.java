@@ -1,16 +1,15 @@
 package com.bloom.app.service.impl;
 
-import com.bloom.app.domain.dto.request.sale.CreateSaleRequest;
-import com.bloom.app.domain.dto.request.sale.FilterSaleRequest;
-import com.bloom.app.domain.dto.request.saleitem.CreateSaleItemRequest;
-import com.bloom.app.domain.dto.response.sale.SaleResponse;
+import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
+import com.bloom.app.api.dto.request.sale.FilterSaleRequest;
+import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
+import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.SaleItem;
-import com.bloom.app.repository.ItemRepository;
-import com.bloom.app.repository.SaleRepository;
-import com.bloom.app.service.CounterService;
+import com.bloom.app.persistence.repository.ItemRepository;
+import com.bloom.app.persistence.repository.SaleRepository;
 import com.bloom.app.service.ExcelExportService;
 import com.bloom.app.service.SaleService;
 import com.bloom.app.service.mapper.SaleMapper;
@@ -33,8 +32,6 @@ import java.util.Optional;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-import com.bloom.app.service.StockMovementService;
-
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -43,8 +40,8 @@ public class SaleServiceImpl implements SaleService {
     private final ItemRepository itemRepository;
     private final SaleMapper saleMapper;
     private final ExcelExportService excelExportService;
-    private final StockMovementService stockMovementService;
-    private final CounterService counterService;
+    private final StockMovementServiceImpl stockMovementService;
+    private final DocumentCounterServiceImpl documentCounterService;
 
     @Override
     @Transactional
@@ -83,7 +80,7 @@ public class SaleServiceImpl implements SaleService {
         }
 
         BigDecimal discount = Optional.ofNullable(request.getDiscountAmount()).orElse(BigDecimal.ZERO);
-        sale.setCode(counterService.generateNextCode("SALE", "SALE"));
+        sale.setCode(documentCounterService.generateNextCode("SALE", "SALE"));
 
         sale.setItems(saleItems);
         sale.setPaymentType(request.getPaymentType());

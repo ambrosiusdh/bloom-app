@@ -1,10 +1,10 @@
 package com.bloom.app.service;
 
-import com.bloom.app.domain.dto.request.itemcategory.CreateItemCategoryRequest;
-import com.bloom.app.domain.dto.request.itemcategory.FilterItemCategoryRequest;
-import com.bloom.app.domain.dto.request.itemcategory.UpdateItemCategoryRequest;
-import com.bloom.app.domain.dto.response.itemcategory.ItemCategoryItemCountResponse;
-import com.bloom.app.domain.dto.response.itemcategory.ItemCategoryResponse;
+import com.bloom.app.api.dto.request.itemcategory.CreateItemCategoryRequest;
+import com.bloom.app.api.dto.request.itemcategory.FilterItemCategoryRequest;
+import com.bloom.app.api.dto.request.itemcategory.UpdateItemCategoryRequest;
+import com.bloom.app.api.dto.response.itemcategory.ItemCategoryItemCountResponse;
+import com.bloom.app.api.dto.response.itemcategory.ItemCategoryResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 

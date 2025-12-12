@@ -9,7 +9,8 @@ CREATE TABLE item_categories (
      created_at TIMESTAMP,
      updated_at TIMESTAMP,
      created_by VARCHAR(255),
-     updated_by VARCHAR(255)
+     updated_by VARCHAR(255),
+     version BIGINT
 );
 
 CREATE TABLE items (
@@ -25,6 +26,7 @@ CREATE TABLE items (
       updated_at TIMESTAMP,
       created_by VARCHAR(255),
       updated_by VARCHAR(255),
+      version BIGINT,
       CONSTRAINT fk_item_category FOREIGN KEY (item_category_id) REFERENCES item_categories(id) ON DELETE SET NULL
 );
 
@@ -64,7 +66,6 @@ CREATE TABLE stock_adjustments (
       id BIGSERIAL PRIMARY KEY,
       stock_adjustment_code VARCHAR(100) NOT NULL UNIQUE,
       reason TEXT,
-      source VARCHAR(50) NOT NULL,
       created_by VARCHAR(255),
       created_at TIMESTAMP NOT NULL
 );
@@ -87,7 +88,6 @@ CREATE INDEX idx_stock_adjustment_items_item_id ON stock_adjustment_items(item_i
 CREATE TABLE item_audit_logs (
     id BIGSERIAL PRIMARY KEY,
     item_id BIGINT NOT NULL,
-    action_type VARCHAR(50) NOT NULL,
     qty INTEGER NOT NULL,
     qty_before INTEGER NOT NULL,
     qty_after INTEGER NOT NULL,
@@ -127,7 +127,7 @@ CREATE TABLE stock_movements (
 CREATE INDEX idx_stock_movements_product_id ON stock_movements(product_id);
 CREATE INDEX idx_stock_movements_source ON stock_movements(source_type, source_id);
 
-CREATE TABLE counters (
+CREATE TABLE document_counters (
     id BIGSERIAL PRIMARY KEY,
     document_type VARCHAR(50) NOT NULL,
     year INTEGER NOT NULL,

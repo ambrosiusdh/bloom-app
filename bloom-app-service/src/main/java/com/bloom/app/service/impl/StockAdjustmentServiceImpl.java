@@ -1,21 +1,19 @@
 package com.bloom.app.service.impl;
 
-import com.bloom.app.domain.dto.request.stockadjustment.CreateStockAdjustmentRequest;
-import com.bloom.app.domain.dto.request.stockadjustment.FilterStockAdjustmentRequest;
-import com.bloom.app.domain.dto.request.stockadjustment.StockAdjustmentItemRequest;
-import com.bloom.app.domain.dto.response.stockadjustment.CsvParseResponse;
-import com.bloom.app.domain.dto.response.stockadjustment.StockAdjustmentResponse;
+import com.bloom.app.api.dto.request.stockadjustment.CreateStockAdjustmentRequest;
+import com.bloom.app.api.dto.request.stockadjustment.FilterStockAdjustmentRequest;
+import com.bloom.app.api.dto.request.stockadjustment.StockAdjustmentItemRequest;
+import com.bloom.app.api.dto.response.stockadjustment.CsvParseResponse;
+import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.StockAdjustment;
 import com.bloom.app.domain.model.StockAdjustmentItem;
-import com.bloom.app.repository.ItemRepository;
-import com.bloom.app.repository.StockAdjustmentRepository;
-import com.bloom.app.service.CounterService;
+import com.bloom.app.persistence.repository.ItemRepository;
+import com.bloom.app.persistence.repository.StockAdjustmentRepository;
 import com.bloom.app.service.StockAdjustmentService;
 import com.bloom.app.service.mapper.StockAdjustmentMapper;
 import com.bloom.app.service.specification.StockAdjustmentSpecification;
-import com.bloom.app.service.StockMovementService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,8 +43,8 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
     private final StockAdjustmentRepository stockAdjustmentRepository;
     private final ItemRepository itemRepository;
     private final StockAdjustmentMapper stockAdjustmentMapper;
-    private final StockMovementService stockMovementService;
-    private final CounterService counterService;
+    private final StockMovementServiceImpl stockMovementService;
+    private final DocumentCounterServiceImpl documentCounterService;
 
     @Override
     @Transactional
@@ -54,7 +52,7 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
         log.debug("StockAdjustmentService createStockAdjustment with request: {}", request);
 
         StockAdjustment stockAdjustment = stockAdjustmentMapper.createRequestToEntity(request);
-        stockAdjustment.setStockAdjustmentCode(counterService.generateNextCode("STOCK_ADJUSTMENT", "SA"));
+        stockAdjustment.setStockAdjustmentCode(documentCounterService.generateNextCode("STOCK_ADJUSTMENT", "SA"));
 
         List<StockAdjustmentItem> stockAdjustmentItems = new ArrayList<>();
 
