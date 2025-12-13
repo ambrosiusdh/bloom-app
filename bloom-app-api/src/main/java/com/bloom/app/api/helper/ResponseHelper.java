@@ -1,6 +1,6 @@
 package com.bloom.app.api.helper;
 
-import com.bloom.app.domain.dto.response.ApiResponse;
+import com.bloom.app.api.dto.response.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 

@@ -1,8 +1,8 @@
 package com.bloom.app.service.mapper;
 
-import com.bloom.app.domain.dto.request.itemcategory.CreateItemCategoryRequest;
-import com.bloom.app.domain.dto.request.itemcategory.UpdateItemCategoryRequest;
-import com.bloom.app.domain.dto.response.itemcategory.ItemCategoryResponse;
+import com.bloom.app.api.dto.request.itemcategory.CreateItemCategoryRequest;
+import com.bloom.app.api.dto.request.itemcategory.UpdateItemCategoryRequest;
+import com.bloom.app.api.dto.response.itemcategory.ItemCategoryResponse;
 import com.bloom.app.domain.model.ItemCategory;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;

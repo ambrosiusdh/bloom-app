@@ -23,11 +23,6 @@
             <artifactId>bloom-app-domain</artifactId>
             <version>0.0.1-SNAPSHOT</version>
         </dependency>
-        <dependency>
-            <groupId>com.bloom</groupId>
-            <artifactId>bloom-app-service</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
-        </dependency>
 
         <dependency>
             <groupId>org.springdoc</groupId>

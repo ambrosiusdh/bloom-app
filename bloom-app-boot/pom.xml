@@ -14,12 +14,12 @@
     <dependencies>
         <dependency>
             <groupId>com.bloom</groupId>
-            <artifactId>bloom-app-domain</artifactId>
+            <artifactId>bloom-app-web</artifactId>
             <version>0.0.1-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>com.bloom</groupId>
-            <artifactId>bloom-app-api</artifactId>
+            <artifactId>bloom-app-service</artifactId>
             <version>0.0.1-SNAPSHOT</version>
         </dependency>
 

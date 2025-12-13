@@ -1,9 +1,16 @@
 package com.bloom.app.service.impl;
 
-import com.bloom.app.domain.dto.response.dashboard.*;
+import com.bloom.app.api.dto.response.dashboard.CategoryDto;
+import com.bloom.app.api.dto.response.dashboard.ChartDataPoint;
+import com.bloom.app.api.dto.response.dashboard.DashboardResponse;
+import com.bloom.app.api.dto.response.dashboard.LowStockDto;
+import com.bloom.app.api.dto.response.dashboard.RevenueChartDto;
+import com.bloom.app.api.dto.response.dashboard.SummaryDto;
+import com.bloom.app.api.dto.response.dashboard.TransactionDto;
 import com.bloom.app.domain.model.Sale;
-import com.bloom.app.repository.ItemRepository;
-import com.bloom.app.repository.SaleRepository;
+import com.bloom.app.persistence.projection.TopCategoryProjection;
+import com.bloom.app.persistence.repository.ItemRepository;
+import com.bloom.app.persistence.repository.SaleRepository;
 import com.bloom.app.service.DashboardService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -147,7 +154,13 @@ public class DashboardServiceImpl implements DashboardService {
         }
 
         private List<CategoryDto> getTopCategories() {
-                List<CategoryDto> topCategories = saleRepository.findTopCategories(PageRequest.of(0, 4));
+                List<TopCategoryProjection> topCategoriesProjections = saleRepository.findTopCategories(PageRequest.of(0, 4));
+                List<CategoryDto> topCategories = topCategoriesProjections.stream()
+                                .map(proj -> CategoryDto.builder()
+                                                .name(proj.getName())
+                                                .value(proj.getTotal())
+                                                .build())
+                                .collect(Collectors.toList());
                 BigDecimal totalRevenue = Optional.ofNullable(saleRepository.getTotalRevenue()).orElse(BigDecimal.ZERO);
 
                 BigDecimal topCategoriesRevenue = topCategories.stream()

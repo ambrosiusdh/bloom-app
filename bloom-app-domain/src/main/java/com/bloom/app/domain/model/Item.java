@@ -55,4 +55,7 @@ public class Item {
     private String createdBy;
     @LastModifiedBy
     private String updatedBy;
+
+    @Version
+    private long version;
 }

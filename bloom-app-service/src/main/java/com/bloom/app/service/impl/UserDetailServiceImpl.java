@@ -1,7 +1,7 @@
 package com.bloom.app.service.impl;
 
 import com.bloom.app.domain.exception.InvalidLoginException;
-import com.bloom.app.repository.UserRepository;
+import com.bloom.app.persistence.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;

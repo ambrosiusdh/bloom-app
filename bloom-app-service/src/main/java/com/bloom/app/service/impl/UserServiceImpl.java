@@ -1,18 +1,17 @@
 package com.bloom.app.service.impl;
 
-import com.bloom.app.domain.dto.request.user.CreateUserRequest;
-import com.bloom.app.domain.dto.request.user.UpdateUserRequest;
-import com.bloom.app.domain.dto.response.user.UserResponse;
+import com.bloom.app.api.dto.request.user.CreateUserRequest;
+import com.bloom.app.api.dto.request.user.UpdateUserRequest;
+import com.bloom.app.api.dto.response.user.UserResponse;
 import com.bloom.app.domain.exception.UserNotFoundException;
 import com.bloom.app.domain.exception.UsernameAlreadyExistsException;
 import com.bloom.app.domain.model.User;
-import com.bloom.app.repository.UserRepository;
+import com.bloom.app.persistence.repository.UserRepository;
 import com.bloom.app.service.UserService;
 import com.bloom.app.service.mapper.UserMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 

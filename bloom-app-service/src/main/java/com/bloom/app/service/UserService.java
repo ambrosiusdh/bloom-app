@@ -1,8 +1,8 @@
 package com.bloom.app.service;
 
-import com.bloom.app.domain.dto.request.user.CreateUserRequest;
-import com.bloom.app.domain.dto.request.user.UpdateUserRequest;
-import com.bloom.app.domain.dto.response.user.UserResponse;
+import com.bloom.app.api.dto.request.user.CreateUserRequest;
+import com.bloom.app.api.dto.request.user.UpdateUserRequest;
+import com.bloom.app.api.dto.response.user.UserResponse;
 import com.bloom.app.domain.model.User;
 
 import java.util.List;

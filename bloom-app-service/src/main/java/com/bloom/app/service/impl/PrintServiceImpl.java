@@ -5,7 +5,7 @@ import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.SaleItem;
 import com.bloom.app.domain.properties.PrinterProperties;
 import com.bloom.app.domain.utils.DateTimeUtils;
-import com.bloom.app.repository.SaleRepository;
+import com.bloom.app.persistence.repository.SaleRepository;
 import com.github.anastaciocintra.escpos.EscPos;
 import com.github.anastaciocintra.escpos.Style;
 import com.github.anastaciocintra.escpos.EscPosConst.Justification;

@@ -1,8 +1,8 @@
 package com.bloom.app.service.mapper;
 
-import com.bloom.app.domain.dto.request.item.CreateItemRequest;
-import com.bloom.app.domain.dto.request.item.UpdateItemRequest;
-import com.bloom.app.domain.dto.response.item.ItemResponse;
+import com.bloom.app.api.dto.request.item.CreateItemRequest;
+import com.bloom.app.api.dto.request.item.UpdateItemRequest;
+import com.bloom.app.api.dto.response.item.ItemResponse;
 import com.bloom.app.domain.model.Item;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;

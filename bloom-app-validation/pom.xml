@@ -20,7 +20,7 @@
     <dependencies>
         <dependency>
             <groupId>com.bloom</groupId>
-            <artifactId>bloom-app-persistence</artifactId>
+            <artifactId>bloom-app-api</artifactId>
             <version>0.0.1-SNAPSHOT</version>
         </dependency>
     </dependencies>
