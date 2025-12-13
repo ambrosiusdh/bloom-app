@@ -1,5 +1,3 @@
-CREATE SEQUENCE hibernate_sequence START 1;
-
 CREATE TABLE item_categories (
      id BIGSERIAL PRIMARY KEY,
      name VARCHAR(255),
@@ -11,6 +9,16 @@ CREATE TABLE item_categories (
      created_by VARCHAR(255),
      updated_by VARCHAR(255),
      version BIGINT
+);
+
+CREATE TABLE item_category_counters (
+    id BIGSERIAL PRIMARY KEY,
+    item_category_id BIGINT NOT NULL,
+    current_sequence BIGINT NOT NULL,
+    CONSTRAINT fk_item_category_counters_item_category
+        FOREIGN KEY (item_category_id)
+            REFERENCES item_categories(id)
+            ON DELETE CASCADE
 );
 
 CREATE TABLE items (
@@ -52,11 +60,13 @@ CREATE INDEX idx_sales_created_at ON sales(created_at);
 
 CREATE TABLE sale_items (
        id BIGSERIAL PRIMARY KEY,
-       sale_id BIGINT REFERENCES sales(id) ON DELETE CASCADE,
-       item_id BIGINT REFERENCES items(id),
-       quantity INTEGER,
-       unit_price NUMERIC(19, 2),
-       subtotal NUMERIC(19, 2)
+       sale_id BIGINT NOT NULL,
+       item_id BIGINT NOT NULL,
+       quantity INTEGER NOT NULL,
+       unit_price NUMERIC(19, 2) NOT NULL,
+       subtotal NUMERIC(19, 2),
+       CONSTRAINT fk_sale_items_sale FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
+       CONSTRAINT fk_sale_items_item FOREIGN KEY (item_id) REFERENCES items(id)
 );
 
 CREATE INDEX idx_sale_items_sale_id ON sale_items(sale_id);
@@ -151,7 +161,8 @@ CREATE TABLE goods_receipt_items (
     goods_receipt_id BIGINT NOT NULL,
     item_id BIGINT NOT NULL,
     quantity INTEGER NOT NULL,
-    CONSTRAINT fk_goods_receipt_items_receipt FOREIGN KEY (goods_receipt_id) REFERENCES goods_receipts(id) ON DELETE CASCADE,
+    CONSTRAINT fk_goods_receipt_items_receipt
+        FOREIGN KEY (goods_receipt_id) REFERENCES goods_receipts(id) ON DELETE CASCADE,
     CONSTRAINT fk_goods_receipt_items_item FOREIGN KEY (item_id) REFERENCES items(id)
 );
 

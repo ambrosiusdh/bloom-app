@@ -17,6 +17,7 @@ public class CreateItemRequest {
     @NotBlank
     private String categoryCode;
 
+    private String sku;
     private String description;
 
     @NotNull
