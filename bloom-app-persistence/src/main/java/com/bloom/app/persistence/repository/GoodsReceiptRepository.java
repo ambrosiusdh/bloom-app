@@ -9,7 +9,8 @@ import java.time.Instant;
 import java.util.Optional;
 
 @Repository
-public interface GoodsReceiptRepository extends JpaRepository<GoodsReceipt, Long> {
+public interface GoodsReceiptRepository extends JpaRepository<GoodsReceipt, Long>,
+        org.springframework.data.jpa.repository.JpaSpecificationExecutor<GoodsReceipt> {
     Optional<GoodsReceipt> findByCode(String code);
 
     @Query("SELECT COUNT(g) FROM GoodsReceipt g WHERE g.createdAt BETWEEN :start AND :end")

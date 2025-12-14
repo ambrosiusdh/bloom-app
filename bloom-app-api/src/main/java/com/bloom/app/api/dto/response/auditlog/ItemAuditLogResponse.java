@@ -16,7 +16,7 @@ import java.time.Instant;
 public class ItemAuditLogResponse {
     private Long id;
     private ItemResponse item;
-    private MovementSourceType sourceType;
+    private MovementSourceType source;
     private Integer qty;
     private Integer qtyBefore;
     private Integer qtyAfter;

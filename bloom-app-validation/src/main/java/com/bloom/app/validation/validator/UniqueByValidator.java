@@ -1,17 +1,13 @@
 package com.bloom.app.validation.validator;
 
-import com.bloom.app.api.validation.UniqueBy;
+import com.bloom.app.validation.UniqueBy;
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
-import jakarta.validation.constraintvalidation.SupportedValidationTarget;
-import jakarta.validation.constraintvalidation.ValidationTarget;
-
 import java.lang.reflect.Field;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-@SupportedValidationTarget(ValidationTarget.ANNOTATED_ELEMENT)
 public class UniqueByValidator implements ConstraintValidator<UniqueBy, List<?>> {
     private String property;
 

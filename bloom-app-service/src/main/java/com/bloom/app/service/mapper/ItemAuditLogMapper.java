@@ -8,5 +8,6 @@ import org.mapstruct.Mapping;
 @Mapper(componentModel = "spring", uses = { ItemMapper.class })
 public interface ItemAuditLogMapper {
     @Mapping(target = "item", source = "item")
+    @Mapping(target = "source", source = "source")
     ItemAuditLogResponse toResponse(ItemAuditLog itemAuditLog);
 }

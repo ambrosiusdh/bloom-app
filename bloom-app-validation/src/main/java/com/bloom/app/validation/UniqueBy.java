@@ -1,5 +1,6 @@
-package com.bloom.app.api.validation;
+package com.bloom.app.validation;
 
+import com.bloom.app.validation.validator.UniqueByValidator;
 import jakarta.validation.Constraint;
 import jakarta.validation.Payload;
 
@@ -10,7 +11,7 @@ import java.lang.annotation.Target;
 
 @Target({ ElementType.FIELD })
 @Retention(RetentionPolicy.RUNTIME)
-@Constraint(validatedBy = {})
+@Constraint(validatedBy = UniqueByValidator.class)
 public @interface UniqueBy {
     String message() default "Duplicates found based on property {property}";
 

@@ -29,7 +29,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/stock-adjustment")
+@RequestMapping("/api/stock-adjustments")
 @RequiredArgsConstructor
 public class StockAdjustmentController {
     private final StockAdjustmentService stockAdjustmentService;
@@ -37,7 +37,8 @@ public class StockAdjustmentController {
     @PostMapping(path = "/csv-parse", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Parse CSV for Stock Adjustment", description = "Parse a CSV/Excel file to preview stock adjustment items.")
     public ResponseEntity<ApiResponse<List<CsvParseResponse>>> parseCsv(
-            @Parameter(description = "CSV/Excel file to parse") @RequestParam("file") MultipartFile file) {
+        @Parameter(description = "CSV/Excel file to parse") @RequestParam("file") MultipartFile file
+    ) {
         List<CsvParseResponse> response = stockAdjustmentService.parseCsv(file);
         return ResponseHelper.ok(response);
     }
@@ -45,7 +46,8 @@ public class StockAdjustmentController {
     @PostMapping
     @Operation(summary = "Create Stock Adjustment", description = "Create a new stock adjustment transaction.")
     public ResponseEntity<ApiResponse<StockAdjustmentResponse>> createStockAdjustment(
-            @Valid @RequestBody CreateStockAdjustmentRequest request) {
+        @Valid @RequestBody CreateStockAdjustmentRequest request
+    ) {
         StockAdjustmentResponse response = stockAdjustmentService.createStockAdjustment(request);
         return ResponseHelper.ok(response);
     }
@@ -53,10 +55,11 @@ public class StockAdjustmentController {
     @GetMapping
     @Operation(summary = "Filter Stock Adjustments", description = "Retrieve a paginated list of stock adjustments based on filters.")
     public ResponseEntity<ApiResponse<Page<StockAdjustmentResponse>>> filterStockAdjustments(
-            FilterStockAdjustmentRequest request,
-            Pageable pageable) {
+        FilterStockAdjustmentRequest request,
+        Pageable pageable
+    ) {
         Page<StockAdjustmentResponse> response = stockAdjustmentService.filterStockAdjustments(request,
-                PagingHelper.toPageRequest(pageable));
+            PagingHelper.toPageRequest(pageable));
         return ResponseHelper.ok(response);
     }
 
@@ -66,17 +69,18 @@ public class StockAdjustmentController {
         StreamingResponseBody stream = stockAdjustmentService::downloadTemplate;
 
         return ResponseEntity.ok()
-                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"stock-adjustment-template.xlsx\"")
-                .contentType(
-                        MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
-                .body(stream);
+            .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"stock-adjustment-template.xlsx\"")
+            .contentType(
+                MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+            .body(stream);
     }
 
-    @GetMapping("/{code}")
+    @GetMapping("/details")
     @Operation(summary = "Get Stock Adjustment Details", description = "Retrieve detailed information about a specific stock adjustment.")
     public ResponseEntity<ApiResponse<StockAdjustmentResponse>> getStockAdjustmentDetails(
-            @Parameter(description = "Code of the stock adjustment") @PathVariable String code) {
+        @Parameter(description = "Code of the stock adjustment") @RequestParam String code
+    ) {
         StockAdjustmentResponse response = stockAdjustmentService.getStockAdjustmentDetails(code);
         return ResponseHelper.ok(response);
     }

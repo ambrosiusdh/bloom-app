@@ -1,6 +1,6 @@
 package com.bloom.app.api.dto.request.stockadjustment;
 
-import com.bloom.app.api.validation.UniqueBy;
+import com.bloom.app.validation.UniqueBy;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import lombok.AllArgsConstructor;
