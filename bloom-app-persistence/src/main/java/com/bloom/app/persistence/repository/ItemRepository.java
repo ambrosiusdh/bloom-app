@@ -11,6 +11,8 @@ import java.util.Optional;
 public interface ItemRepository extends JpaRepository<Item, Long>, JpaSpecificationExecutor<Item> {
     Optional<Item> findItemBySku(String sku);
 
+    List<Item> findBySkuIn(List<String> skus);
+
     List<Item> findByStockQuantityLessThan(Integer quantity);
 
     List<Item> findAllByCategory(ItemCategory category);

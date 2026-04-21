@@ -14,6 +14,7 @@ import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.service.ItemService;
 import com.bloom.app.service.mapper.ItemMapper;
 import com.bloom.app.service.specification.ItemSpecification;
+import com.bloom.app.service.util.PdfGeneratorUtil;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -112,5 +113,28 @@ public class ItemServiceImpl implements ItemService {
         itemCategoryCounter.setLastSequence(nextSequence);
         itemCategoryCounterRepository.save(itemCategoryCounter);
         return sku;
+    }
+
+    @Override
+    public byte[] generateSingleBarcodePdf(String sku) {
+        log.debug("ItemService generateSingleBarcodePdf using sku: {}", sku);
+        Item item = itemRepository.findItemBySku(sku)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Item not found"));
+        return PdfGeneratorUtil.generateBarcodeLayoutPdf(List.of(item));
+    }
+
+    @Override
+    public byte[] generateBulkBarcodePdf(List<String> skus) {
+        log.debug("ItemService generateBulkBarcodePdf using skus: {}", skus);
+        if (skus == null || skus.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "SKU list cannot be empty");
+        }
+
+        List<Item> items = itemRepository.findBySkuIn(skus);
+        if (items.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No items found for the provided SKUs");
+        }
+
+        return PdfGeneratorUtil.generateBarcodeLayoutPdf(items);
     }
 }

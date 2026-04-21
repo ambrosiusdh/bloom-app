@@ -8,6 +8,8 @@ import com.bloom.app.domain.model.ItemCategory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.util.List;
+
 public interface ItemService {
     ItemResponse createItem(CreateItemRequest request);
 
@@ -20,4 +22,8 @@ public interface ItemService {
     ItemResponse getItemDetails(String sku);
 
     String generateSku(ItemCategory category);
+
+    byte[] generateSingleBarcodePdf(String sku);
+
+    byte[] generateBulkBarcodePdf(List<String> skus);
 }
