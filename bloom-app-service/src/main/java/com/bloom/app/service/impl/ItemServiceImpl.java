@@ -35,6 +35,7 @@ public class ItemServiceImpl implements ItemService {
     private final ItemCategoryRepository itemCategoryRepository;
     private final ItemCategoryCounterRepository itemCategoryCounterRepository;
     private final ItemMapper itemMapper;
+    private final PdfGeneratorUtil pdfGeneratorUtil;
 
     @Override
     @Transactional
@@ -120,7 +121,7 @@ public class ItemServiceImpl implements ItemService {
         log.debug("ItemService generateSingleBarcodePdf using sku: {}", sku);
         Item item = itemRepository.findItemBySku(sku)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Item not found"));
-        return PdfGeneratorUtil.generateBarcodeLayoutPdf(List.of(item));
+        return pdfGeneratorUtil.generateBarcodeLayoutPdf(List.of(item));
     }
 
     @Override
@@ -135,6 +136,6 @@ public class ItemServiceImpl implements ItemService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No items found for the provided SKUs");
         }
 
-        return PdfGeneratorUtil.generateBarcodeLayoutPdf(items);
+        return pdfGeneratorUtil.generateBarcodeLayoutPdf(items);
     }
 }

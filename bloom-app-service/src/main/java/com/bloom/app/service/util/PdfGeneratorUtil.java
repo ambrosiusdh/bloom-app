@@ -13,20 +13,20 @@ import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
 
+import com.bloom.app.domain.properties.PdfProperties;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
 
+@Component
+@RequiredArgsConstructor
 public class PdfGeneratorUtil {
-
-    private static final int COLUMNS = 3;
-    private static final float MARGIN = 36f; // ~0.5 inch
-
-    private PdfGeneratorUtil() {
-        // Utility class
-    }
+    private final PdfProperties pdfProperties;
 
     /**
      * Generates a printable A4 PDF containing barcode labels for the provided items.
@@ -35,13 +35,16 @@ public class PdfGeneratorUtil {
      * @param items List of items to generate labels for
      * @return byte array of the PDF
      */
-    public static byte[] generateBarcodeLayoutPdf(List<Item> items) {
+    public byte[] generateBarcodeLayoutPdf(List<Item> items) {
+        int columns = pdfProperties.getColumns();
+        float margin = pdfProperties.getMargin();
+
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            Document document = new Document(PageSize.A4, MARGIN, MARGIN, MARGIN, MARGIN);
+            Document document = new Document(PageSize.A4, margin, margin, margin, margin);
             PdfWriter.getInstance(document, baos);
             document.open();
 
-            PdfPTable table = new PdfPTable(COLUMNS);
+            PdfPTable table = new PdfPTable(columns);
             table.setWidthPercentage(100f);
             
             // Give a little space between cells
@@ -90,9 +93,9 @@ public class PdfGeneratorUtil {
             }
 
             // Pad the last row with empty cells if it doesn't divide evenly
-            int remainder = items.size() % COLUMNS;
+            int remainder = items.size() % columns;
             if (remainder != 0) {
-                for (int i = 0; i < COLUMNS - remainder; i++) {
+                for (int i = 0; i < columns - remainder; i++) {
                     PdfPCell emptyCell = new PdfPCell();
                     emptyCell.setBorder(Rectangle.NO_BORDER);
                     table.addCell(emptyCell);
