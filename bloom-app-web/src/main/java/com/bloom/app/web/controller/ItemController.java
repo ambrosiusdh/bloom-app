@@ -1,5 +1,6 @@
 package com.bloom.app.web.controller;
 
+import com.bloom.app.api.dto.request.item.BulkBarcodeRequest;
 import com.bloom.app.api.helper.PagingHelper;
 import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.api.dto.request.item.CreateItemRequest;
@@ -14,7 +15,10 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/items")
 @RequiredArgsConstructor
+@Validated
 public class ItemController {
     private final ItemService itemService;
 
@@ -90,5 +95,35 @@ public class ItemController {
     ) {
         itemService.deactivateItem(sku);
         return ResponseHelper.ok(Boolean.TRUE);
+    }
+
+    @GetMapping(path = "/{sku}/barcode", produces = MediaType.APPLICATION_PDF_VALUE)
+    @Operation(
+        summary = "Download item barcode",
+        description = "Generate and download a printable A4 PDF containing the barcode label for a single item."
+    )
+    public ResponseEntity<byte[]> getSingleBarcodePdf(
+        @Parameter(description = "The SKU of the item") @PathVariable String sku
+    ) {
+        byte[] pdfBytes = itemService.generateSingleBarcodePdf(sku);
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"barcode-" + sku + ".pdf\"")
+            .contentType(MediaType.APPLICATION_PDF)
+            .body(pdfBytes);
+    }
+
+    @PostMapping(path = "/barcode/bulk", produces = MediaType.APPLICATION_PDF_VALUE)
+    @Operation(
+        summary = "Download bulk item barcodes",
+        description = "Generate and download a printable A4 PDF containing barcode labels for multiple items in a 3-column grid."
+    )
+    public ResponseEntity<byte[]> getBulkBarcodePdf(
+        @Valid @RequestBody BulkBarcodeRequest request
+    ) {
+        byte[] pdfBytes = itemService.generateBulkBarcodePdf(request.getSkus());
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"barcodes-bulk.pdf\"")
+            .contentType(MediaType.APPLICATION_PDF)
+            .body(pdfBytes);
     }
 }

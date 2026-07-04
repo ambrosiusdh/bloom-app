@@ -1,5 +1,6 @@
 package com.bloom.app.api.exception;
 
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -19,7 +20,7 @@ import java.util.Map;
 @Slf4j
 public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<?> handleValidationErrors(HttpServletRequest request, MethodArgumentNotValidException ex) throws MethodArgumentNotValidException {
+    public ResponseEntity<?> handleValidationErrors(HttpServletRequest ignoredRequest, MethodArgumentNotValidException ex) {
         List<Map<String, String>> errors = new ArrayList<>();
         for (FieldError fieldError : ex.getBindingResult().getFieldErrors()) {
             Map<String, String> error = new HashMap<>();
@@ -45,6 +46,28 @@ public class GlobalExceptionHandler {
         body.put("errorType", ex.getClass().getSimpleName());
 
         return ResponseEntity.status(ex.getStatusCode()).body(body);
+    }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<?> handleResourceNotFoundException(ResourceNotFoundException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", false);
+        body.put("message", ex.getMessage());
+        body.put("code", HttpStatus.NOT_FOUND.value());
+        body.put("errorType", ex.getClass().getSimpleName());
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<?> handleIllegalArgumentException(IllegalArgumentException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", false);
+        body.put("message", ex.getMessage());
+        body.put("code", HttpStatus.BAD_REQUEST.value());
+        body.put("errorType", ex.getClass().getSimpleName());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
     @ExceptionHandler(Exception.class)

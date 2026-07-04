@@ -5,6 +5,7 @@ import com.bloom.app.api.dto.request.item.FilterItemRequest;
 import com.bloom.app.api.dto.request.item.UpdateItemRequest;
 import com.bloom.app.api.dto.response.item.ItemResponse;
 import com.bloom.app.domain.error.ErrorCode;
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
 import com.bloom.app.domain.model.ItemCategoryCounter;
@@ -14,17 +15,18 @@ import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.service.ItemService;
 import com.bloom.app.service.mapper.ItemMapper;
 import com.bloom.app.service.specification.ItemSpecification;
+import com.bloom.app.service.util.PdfGeneratorUtil;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -34,15 +36,14 @@ public class ItemServiceImpl implements ItemService {
     private final ItemCategoryRepository itemCategoryRepository;
     private final ItemCategoryCounterRepository itemCategoryCounterRepository;
     private final ItemMapper itemMapper;
+    private final PdfGeneratorUtil pdfGeneratorUtil;
 
     @Override
     @Transactional
     public ItemResponse createItem(CreateItemRequest request) {
         log.debug("ItemService createItem using request: {}", request);
         ItemCategory itemCategory = itemCategoryRepository.findByCode(request.getCategoryCode())
-            .orElseThrow(() -> new ResponseStatusException(
-                ErrorCode.ITEM_CATEGORY_NOT_FOUND.getStatus(), ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()
-            ));
+            .orElseThrow(() -> new ResourceNotFoundException(ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()));
 
         String sku;
         if (request.getSku() == null) {
@@ -62,7 +63,7 @@ public class ItemServiceImpl implements ItemService {
     public ItemResponse updateItem(String sku, UpdateItemRequest request) {
         log.debug("ItemService updateItem using request: {}", request);
         Item item = itemRepository.findItemBySku(sku)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Item not found"));
+            .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
         itemMapper.updateRequestToEntity(request, item);
         return itemMapper.itemToItemResponse(itemRepository.save(item));
     }
@@ -72,7 +73,7 @@ public class ItemServiceImpl implements ItemService {
     public void deactivateItem(String sku) {
         log.debug("ItemService deactivateItem using request: {}", sku);
         Item item = itemRepository.findItemBySku(sku)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Item not found"));
+            .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
         item.setActive(false);
         itemRepository.save(item);
     }
@@ -94,7 +95,7 @@ public class ItemServiceImpl implements ItemService {
         log.debug("ItemService getItemDetails using request: {}", sku);
         return itemRepository.findItemBySku(sku)
             .map(itemMapper::itemToItemResponse)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Item not found"));
+            .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
     }
 
     @Transactional
@@ -112,5 +113,42 @@ public class ItemServiceImpl implements ItemService {
         itemCategoryCounter.setLastSequence(nextSequence);
         itemCategoryCounterRepository.save(itemCategoryCounter);
         return sku;
+    }
+
+    @Override
+    public byte[] generateSingleBarcodePdf(String sku) {
+        log.debug("ItemService generateSingleBarcodePdf using sku: {}", sku);
+        Item item = itemRepository.findItemBySku(sku)
+            .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
+        return pdfGeneratorUtil.generateBarcodeLayoutPdf(List.of(item));
+    }
+
+    @Override
+    public byte[] generateBulkBarcodePdf(List<String> skus) {
+        log.debug("ItemService generateBulkBarcodePdf using skus: {}", skus);
+        if (skus == null || skus.isEmpty()) {
+            throw new IllegalArgumentException("SKU list cannot be empty");
+        }
+
+        List<Item> items = itemRepository.findBySkuIn(skus);
+        long uniqueSkusCount = skus.stream().distinct().count();
+
+        if (uniqueSkusCount != items.size()) {
+            List<String> foundSkus = items.stream()
+                .map(Item::getSku)
+                .toList();
+            List<String> missingSkus = skus.stream()
+                .filter(sku -> !foundSkus.contains(sku))
+                .toList();
+            throw new ResourceNotFoundException("Could not generate bulk labels. Missing SKUs: " + missingSkus);
+        }
+
+        Map<String, Item> itemMap = items.stream()
+            .collect(Collectors.toMap(Item::getSku, item -> item));
+        List<Item> sortedItems = skus.stream()
+            .map(itemMap::get)
+            .toList();
+
+        return pdfGeneratorUtil.generateBarcodeLayoutPdf(sortedItems);
     }
 }
