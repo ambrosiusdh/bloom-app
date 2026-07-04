@@ -5,6 +5,7 @@ import com.bloom.app.api.dto.request.item.FilterItemRequest;
 import com.bloom.app.api.dto.request.item.UpdateItemRequest;
 import com.bloom.app.api.dto.response.item.ItemResponse;
 import com.bloom.app.domain.error.ErrorCode;
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
 import com.bloom.app.domain.model.ItemCategoryCounter;
@@ -64,7 +65,7 @@ public class ItemServiceImpl implements ItemService {
     public ItemResponse updateItem(String sku, UpdateItemRequest request) {
         log.debug("ItemService updateItem using request: {}", request);
         Item item = itemRepository.findItemBySku(sku)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Item not found"));
+            .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
         itemMapper.updateRequestToEntity(request, item);
         return itemMapper.itemToItemResponse(itemRepository.save(item));
     }
@@ -74,7 +75,7 @@ public class ItemServiceImpl implements ItemService {
     public void deactivateItem(String sku) {
         log.debug("ItemService deactivateItem using request: {}", sku);
         Item item = itemRepository.findItemBySku(sku)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Item not found"));
+            .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
         item.setActive(false);
         itemRepository.save(item);
     }
@@ -96,7 +97,7 @@ public class ItemServiceImpl implements ItemService {
         log.debug("ItemService getItemDetails using request: {}", sku);
         return itemRepository.findItemBySku(sku)
             .map(itemMapper::itemToItemResponse)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Item not found"));
+            .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
     }
 
     @Transactional
@@ -120,7 +121,7 @@ public class ItemServiceImpl implements ItemService {
     public byte[] generateSingleBarcodePdf(String sku) {
         log.debug("ItemService generateSingleBarcodePdf using sku: {}", sku);
         Item item = itemRepository.findItemBySku(sku)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Item not found"));
+            .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
         return pdfGeneratorUtil.generateBarcodeLayoutPdf(List.of(item));
     }
 
@@ -133,7 +134,7 @@ public class ItemServiceImpl implements ItemService {
 
         List<Item> items = itemRepository.findBySkuIn(skus);
         if (items.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No items found for the provided SKUs");
+            throw new ResourceNotFoundException("No items found for the provided SKUs");
         }
 
         return pdfGeneratorUtil.generateBarcodeLayoutPdf(items);

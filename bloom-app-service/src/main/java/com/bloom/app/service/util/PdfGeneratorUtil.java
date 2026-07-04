@@ -1,6 +1,7 @@
 package com.bloom.app.service.util;
 
 import com.bloom.app.domain.model.Item;
+import com.lowagie.text.Chunk;
 import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
 import com.lowagie.text.Element;
@@ -15,6 +16,7 @@ import com.lowagie.text.pdf.PdfWriter;
 
 import com.bloom.app.domain.properties.PdfProperties;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.awt.Color;
@@ -25,6 +27,7 @@ import java.util.List;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class PdfGeneratorUtil {
     private final PdfProperties pdfProperties;
 
@@ -38,9 +41,12 @@ public class PdfGeneratorUtil {
     public byte[] generateBarcodeLayoutPdf(List<Item> items) {
         int columns = pdfProperties.getColumns();
         float margin = pdfProperties.getMargin();
+        Document document = null;
+        ByteArrayOutputStream baos = null;
 
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            Document document = new Document(PageSize.A4, margin, margin, margin, margin);
+        try {
+            baos = new ByteArrayOutputStream();
+            document = new Document(PageSize.A4, margin, margin, margin, margin);
             PdfWriter.getInstance(document, baos);
             document.open();
 
@@ -72,7 +78,7 @@ public class PdfGeneratorUtil {
                 pdfImage.scaleToFit(140f, 40f);
 
                 Paragraph imgPara = new Paragraph();
-                imgPara.add(new com.lowagie.text.Chunk(pdfImage, 0, 0, true));
+                imgPara.add(new Chunk(pdfImage, 0, 0, true));
                 imgPara.setAlignment(Element.ALIGN_CENTER);
 
                 // 2. Text Content (SKU, Name)
@@ -108,6 +114,19 @@ public class PdfGeneratorUtil {
             return baos.toByteArray();
         } catch (DocumentException | IOException e) {
             throw new RuntimeException("Failed to generate PDF for barcode labels.", e);
+        } finally {
+            // Ensure the document is closed to free resources
+            if (document != null && document.isOpen()) {
+                document.close();
+            }
+            
+            if (baos != null) {
+                try {
+                    baos.close();
+                } catch (IOException e) {
+                    log.error("Failed to close ByteArrayOutputStream", e);
+                }
+            }
         }
     }
 }

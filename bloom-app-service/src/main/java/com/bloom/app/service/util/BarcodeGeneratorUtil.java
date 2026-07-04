@@ -4,12 +4,13 @@ import com.google.zxing.BarcodeFormat;
 import com.google.zxing.client.j2se.MatrixToImageWriter;
 import com.google.zxing.common.BitMatrix;
 import com.google.zxing.oned.Code128Writer;
-import lombok.NoArgsConstructor;
 
 import java.awt.image.BufferedImage;
 
-@NoArgsConstructor
 public class BarcodeGeneratorUtil {
+    private BarcodeGeneratorUtil() {
+        throw new UnsupportedOperationException("This is a utility class and cannot be instantiated");
+    }
     /**
      * Generates a Code128 barcode BufferedImage from a given text (SKU).
      *
