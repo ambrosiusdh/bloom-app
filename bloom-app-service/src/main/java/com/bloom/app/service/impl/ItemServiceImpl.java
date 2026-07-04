@@ -22,11 +22,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -43,9 +43,7 @@ public class ItemServiceImpl implements ItemService {
     public ItemResponse createItem(CreateItemRequest request) {
         log.debug("ItemService createItem using request: {}", request);
         ItemCategory itemCategory = itemCategoryRepository.findByCode(request.getCategoryCode())
-            .orElseThrow(() -> new ResponseStatusException(
-                ErrorCode.ITEM_CATEGORY_NOT_FOUND.getStatus(), ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()
-            ));
+            .orElseThrow(() -> new ResourceNotFoundException(ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()));
 
         String sku;
         if (request.getSku() == null) {
@@ -129,14 +127,27 @@ public class ItemServiceImpl implements ItemService {
     public byte[] generateBulkBarcodePdf(List<String> skus) {
         log.debug("ItemService generateBulkBarcodePdf using skus: {}", skus);
         if (skus == null || skus.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "SKU list cannot be empty");
+            throw new IllegalArgumentException("SKU list cannot be empty");
         }
 
         List<Item> items = itemRepository.findBySkuIn(skus);
-        if (items.isEmpty()) {
-            throw new ResourceNotFoundException("No items found for the provided SKUs");
+
+        if (items.size() != skus.size()) {
+            List<String> foundSkus = items.stream()
+                .map(Item::getSku)
+                .toList();
+            List<String> missingSkus = skus.stream()
+                .filter(sku -> !foundSkus.contains(sku))
+                .toList();
+            throw new ResourceNotFoundException("Could not generate bulk labels. Missing SKUs: " + missingSkus);
         }
 
-        return pdfGeneratorUtil.generateBarcodeLayoutPdf(items);
+        Map<String, Item> itemMap = items.stream()
+            .collect(Collectors.toMap(Item::getSku, item -> item));
+        List<Item> sortedItems = skus.stream()
+            .map(itemMap::get)
+            .toList();
+
+        return pdfGeneratorUtil.generateBarcodeLayoutPdf(sortedItems);
     }
 }

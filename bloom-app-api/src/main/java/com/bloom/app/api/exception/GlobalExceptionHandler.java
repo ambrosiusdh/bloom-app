@@ -5,16 +5,38 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<?> handleValidationErrors(HttpServletRequest ignoredRequest, MethodArgumentNotValidException ex) {
+        List<Map<String, String>> errors = new ArrayList<>();
+        for (FieldError fieldError : ex.getBindingResult().getFieldErrors()) {
+            Map<String, String> error = new HashMap<>();
+            error.put("field", fieldError.getField());
+            error.put("message", fieldError.getDefaultMessage());
+            errors.add(error);
+        }
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", false);
+        body.put("errorType", "ValidationFailed");
+        body.put("message", errors);
+
+        return ResponseEntity.badRequest().body(body);
+    }
+
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<?> handleResponseStatusException(ResponseStatusException ex) {
         Map<String, Object> body = new HashMap<>();
@@ -27,7 +49,7 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<?> handleResponseStatusException(ResourceNotFoundException ex) {
+    public ResponseEntity<?> handleResourceNotFoundException(ResourceNotFoundException ex) {
         Map<String, Object> body = new HashMap<>();
         body.put("success", false);
         body.put("message", ex.getMessage());
@@ -35,6 +57,17 @@ public class GlobalExceptionHandler {
         body.put("errorType", ex.getClass().getSimpleName());
 
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<?> handleIllegalArgumentException(IllegalArgumentException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", false);
+        body.put("message", ex.getMessage());
+        body.put("code", HttpStatus.BAD_REQUEST.value());
+        body.put("errorType", ex.getClass().getSimpleName());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
     @ExceptionHandler(Exception.class)
