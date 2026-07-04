@@ -131,8 +131,9 @@ public class ItemServiceImpl implements ItemService {
         }
 
         List<Item> items = itemRepository.findBySkuIn(skus);
+        long uniqueSkusCount = skus.stream().distinct().count();
 
-        if (items.size() != skus.size()) {
+        if (uniqueSkusCount != items.size()) {
             List<String> foundSkus = items.stream()
                 .map(Item::getSku)
                 .toList();
