@@ -1,6 +1,7 @@
 package com.bloom.app.api.dto.request.stockadjustment;
 
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
+import com.bloom.app.domain.enums.StockLocation;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -20,4 +21,7 @@ public class StockAdjustmentItemRequest {
 
     @NotNull
     private StockAdjustmentActionType actionType;
+
+    @NotNull
+    private StockLocation stockLocation;
 }

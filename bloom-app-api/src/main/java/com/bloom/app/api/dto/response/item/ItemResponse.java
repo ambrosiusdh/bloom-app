@@ -8,6 +8,8 @@ import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 
+import java.math.BigDecimal;
+
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
@@ -16,8 +18,10 @@ public class ItemResponse {
     private String name;
     private String sku;
     private String description;
-    private Double price;
+    private BigDecimal price;
     private Integer stockQuantity;
+    private Integer stockStore;
+    private Integer stockWarehouse;
     private ItemCategoryResponse category;
 
     private Instant createdAt;

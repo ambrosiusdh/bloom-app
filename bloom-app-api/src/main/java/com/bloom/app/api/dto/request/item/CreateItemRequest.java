@@ -7,6 +7,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
@@ -21,8 +23,13 @@ public class CreateItemRequest {
     private String description;
 
     @NotNull
-    private Double price;
+    private BigDecimal price;
 
     @NotNull
-    private Integer stockQuantity;
+    @Builder.Default
+    private Integer stockStore = 0;
+
+    @NotNull
+    @Builder.Default
+    private Integer stockWarehouse = 0;
 }

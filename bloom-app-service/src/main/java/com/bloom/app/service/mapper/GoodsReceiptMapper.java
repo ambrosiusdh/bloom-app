@@ -9,7 +9,10 @@ import org.mapstruct.Mapping;
 @Mapper(componentModel = "spring", uses = { GoodsReceiptItemMapper.class })
 public interface GoodsReceiptMapper {
     @Mapping(target = "items", ignore = true)
+    @Mapping(target = "supplier", ignore = true)
     GoodsReceipt createRequestToEntity(CreateGoodsReceiptRequest request);
 
+    @Mapping(source = "supplier.code", target = "supplierCode")
+    @Mapping(source = "supplier.name", target = "supplierName")
     GoodsReceiptResponse toResponse(GoodsReceipt goodsReceipt);
 }

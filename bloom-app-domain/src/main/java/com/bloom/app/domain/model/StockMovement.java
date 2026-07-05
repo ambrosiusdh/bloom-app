@@ -13,6 +13,8 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.Instant;
 
+import com.bloom.app.domain.enums.StockLocation;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -54,4 +56,14 @@ public class StockMovement {
     @Column(name = "created_by", updatable = false)
     @CreatedBy
     private String createdBy;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "stock_location", nullable = false)
+    private StockLocation stockLocation;
+
+    @Column(name = "qty_before", nullable = false)
+    private Integer qtyBefore;
+
+    @Column(name = "qty_after", nullable = false)
+    private Integer qtyAfter;
 }

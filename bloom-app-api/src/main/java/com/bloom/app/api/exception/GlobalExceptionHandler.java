@@ -1,5 +1,6 @@
 package com.bloom.app.api.exception;
 
+import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -46,6 +47,17 @@ public class GlobalExceptionHandler {
         body.put("errorType", ex.getClass().getSimpleName());
 
         return ResponseEntity.status(ex.getStatusCode()).body(body);
+    }
+
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<?> handleBusinessException(BusinessException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", false);
+        body.put("message", ex.getMessage());
+        body.put("code", ex.getErrorCode().getCode());
+        body.put("errorType", ex.getClass().getSimpleName());
+
+        return ResponseEntity.status(ex.getErrorCode().getStatus()).body(body);
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)

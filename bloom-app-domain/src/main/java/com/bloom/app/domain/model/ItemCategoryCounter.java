@@ -1,5 +1,6 @@
 package com.bloom.app.domain.model;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -17,7 +18,7 @@ import lombok.Setter;
 
 @Entity
 @Table(name = "item_category_counters", uniqueConstraints = {
-    @UniqueConstraint(columnNames = { "category_id", "currentSequence" })
+    @UniqueConstraint(columnNames = { "item_category_id", "current_sequence" })
 })
 @Getter
 @Setter
@@ -30,10 +31,11 @@ public class ItemCategoryCounter {
     private Long id;
 
     @OneToOne
-    @JoinColumn(name = "category_id", nullable = false, unique = true)
-    private ItemCategory category;
+    @JoinColumn(name = "item_category_id", nullable = false, unique = true)
+    private ItemCategory itemCategory;
 
-    private long lastSequence;
+    @Column(name = "current_sequence", nullable = false)
+    private long currentSequence;
 
     @Version
     private long version;

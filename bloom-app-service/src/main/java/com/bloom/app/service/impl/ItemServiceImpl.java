@@ -103,14 +103,14 @@ public class ItemServiceImpl implements ItemService {
     public String generateSku(ItemCategory itemCategory) {
         ItemCategoryCounter itemCategoryCounter = itemCategoryCounterRepository.findByCategory(itemCategory)
             .orElseGet(() -> ItemCategoryCounter.builder()
-                .category(itemCategory)
-                .lastSequence(0)
+                .itemCategory(itemCategory)
+                .currentSequence(0)
                 .build()
             );
-        long nextSequence = itemCategoryCounter.getLastSequence() + 1;
+        long nextSequence = itemCategoryCounter.getCurrentSequence() + 1;
         String sku = String.format("%s-%05d", itemCategory.getCode(), nextSequence);
 
-        itemCategoryCounter.setLastSequence(nextSequence);
+        itemCategoryCounter.setCurrentSequence(nextSequence);
         itemCategoryCounterRepository.save(itemCategoryCounter);
         return sku;
     }
