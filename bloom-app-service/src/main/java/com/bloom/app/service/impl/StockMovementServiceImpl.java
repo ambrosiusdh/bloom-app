@@ -2,6 +2,7 @@ package com.bloom.app.service.impl;
 
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
+import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.model.*;
 import com.bloom.app.persistence.repository.StockMovementRepository;
@@ -36,16 +37,19 @@ public class StockMovementServiceImpl implements StockMovementService {
         Item item,
         int quantity,
         MovementType movementType,
-        String referenceNo
+        String referenceNo,
+        StockLocation stockLocation
     ) {
-        log.debug("Recording movement: item={}, qty={}, type={}, source={}", item.getSku(), quantity, movementType,
-                sourceType);
+        log.debug("Recording movement: item={}, qty={}, type={}, source={}, location={}", item.getSku(), quantity, movementType,
+                sourceType, stockLocation);
 
         if (quantity <= 0) {
             throw new IllegalArgumentException(ErrorCode.ITEM_QUANTITY_MUST_BE_POSITIVE.getMessage());
         }
 
-        int previousStock = item.getStockQuantity();
+        int previousStock = (stockLocation == StockLocation.STORE)
+                ? (item.getStockStore() != null ? item.getStockStore() : 0)
+                : (item.getStockWarehouse() != null ? item.getStockWarehouse() : 0);
         int newStock;
 
         if (movementType == MovementType.IN) {
@@ -56,12 +60,16 @@ public class StockMovementServiceImpl implements StockMovementService {
                 // Option: we could throw error if stock goes negative, or allow it.
                 // User requirement: "Validate stock does not go negative"
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Insufficient stock for item: " + item.getSku());
+                        "Insufficient stock in " + stockLocation + " for item: " + item.getSku());
             }
         }
 
         // 1. Update Product Stock (Performance Optimization)
-        item.setStockQuantity(newStock);
+        if (stockLocation == StockLocation.STORE) {
+            item.setStockStore(newStock);
+        } else {
+            item.setStockWarehouse(newStock);
+        }
         itemRepository.save(item);
 
         // 2. Create StockMovement (Ledger)
@@ -71,6 +79,9 @@ public class StockMovementServiceImpl implements StockMovementService {
                 .sourceType(sourceType)
                 .sourceId(sourceId)
                 .quantity(quantity)
+                .stockLocation(stockLocation)
+                .qtyBefore(previousStock)
+                .qtyAfter(newStock)
                 .build();
         stockMovementRepository.save(movement);
 
@@ -95,7 +106,8 @@ public class StockMovementServiceImpl implements StockMovementService {
                     saleItem.getItem(),
                     saleItem.getQuantity(),
                     MovementType.OUT,
-                    sale.getCode()
+                    sale.getCode(),
+                    saleItem.getStockLocation()
             );
         }
     }
@@ -144,7 +156,8 @@ public class StockMovementServiceImpl implements StockMovementService {
                     item.getItem(),
                     qty,
                     type,
-                    adjustment.getStockAdjustmentCode()
+                    adjustment.getStockAdjustmentCode(),
+                    item.getStockLocation()
                 );
             }
         }

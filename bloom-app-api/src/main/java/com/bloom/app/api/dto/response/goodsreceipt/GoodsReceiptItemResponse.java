@@ -6,6 +6,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+import com.bloom.app.domain.enums.StockLocation;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -13,4 +16,6 @@ import lombok.NoArgsConstructor;
 public class GoodsReceiptItemResponse {
     private ItemResponse item;
     private Integer quantity;
+    private BigDecimal purchasePrice;
+    private StockLocation stockLocation;
 }

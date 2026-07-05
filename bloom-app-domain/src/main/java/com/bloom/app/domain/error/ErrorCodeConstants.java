@@ -19,6 +19,8 @@ public class ErrorCodeConstants {
 
     public static final String SALE_NOT_FOUND_CODE = "sale_not_found";
     public static final String SALE_NOT_FOUND_MESSAGE = "Transaksi tidak ditemukan";
+    public static final String SALE_INSUFFICIENT_STOCK_CODE = "sale_insufficient_stock";
+    public static final String SALE_INSUFFICIENT_STOCK_MESSAGE = "Jumlah stok item %s pada %s tidak mencukupi untuk transaksi";
     public static final String SALE_PAID_LESS_THAN_TOTAL_CODE = "sale_paid_less_than_total";
     public static final String SALE_PAID_LESS_THAN_TOTAL_MESSAGE = "Jumlah pembayaran lebih kecil dari total transaksi";
 }

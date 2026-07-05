@@ -17,6 +17,10 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 
+import com.bloom.app.domain.enums.StockLocation;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+
 @Entity
 @Table(name = "goods_receipt_items")
 @Getter
@@ -40,5 +44,12 @@ public class GoodsReceiptItem {
 
     @Column(name = "quantity", nullable = false)
     private Integer quantity;
+
+    @Column(name = "purchase_price", nullable = false)
+    private BigDecimal purchasePrice;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "stock_location", nullable = false)
+    private StockLocation stockLocation;
 
 }

@@ -17,6 +17,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import com.bloom.app.domain.enums.StockLocation;
+
 @Data
 @Entity
 @Builder
@@ -48,4 +50,8 @@ public class StockAdjustmentItem {
 
     @Column(name = "new_stock", nullable = false)
     private Integer newStock;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "stock_location", nullable = false)
+    private StockLocation stockLocation;
 }

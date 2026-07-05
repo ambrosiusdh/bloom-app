@@ -17,6 +17,7 @@ public class GoodsReceiptResponse {
     private Long id;
     private String code;
     private Instant receivedDate;
+    private String supplierCode;
     private String supplierName;
     private String description;
     private Instant createdAt;

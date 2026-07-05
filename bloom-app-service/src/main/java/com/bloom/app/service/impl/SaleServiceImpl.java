@@ -1,10 +1,14 @@
 package com.bloom.app.service.impl;
 
+import com.bloom.app.domain.enums.DocumentType;
+import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
 import com.bloom.app.api.dto.request.sale.FilterSaleRequest;
 import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.domain.error.ErrorCode;
+import com.bloom.app.domain.exception.BusinessException;
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.SaleItem;
@@ -52,19 +56,20 @@ public class SaleServiceImpl implements SaleService {
         BigDecimal total = BigDecimal.ZERO;
 
         if (request.getSaleItemList() == null || request.getSaleItemList().isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cart is empty");
+            throw new IllegalArgumentException("Cart is empty");
         }
 
         for (CreateSaleItemRequest itemRequest : request.getSaleItemList()) {
             Item item = itemRepository.findItemBySku(itemRequest.getItemSku())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                            "Item not found: " + itemRequest.getItemSku()));
+                    .orElseThrow(() -> new ResourceNotFoundException("Item not found: " + itemRequest.getItemSku()));
+            Integer stockQuantity = itemRequest.getStockLocation().equals(StockLocation.STORE)
+                ? item.getStockStore() : item.getStockWarehouse();
 
-            if (item.getStockQuantity() < itemRequest.getQuantity()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cart quantity is more than stock quantity");
+            if (stockQuantity < itemRequest.getQuantity()) {
+                throw new BusinessException(ErrorCode.SALE_INSUFFICIENT_STOCK_STORE, item.getName(), itemRequest.getStockLocation());
             }
 
-            BigDecimal unitPrice = BigDecimal.valueOf(item.getPrice());
+            BigDecimal unitPrice = item.getPrice();
             BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(itemRequest.getQuantity()));
 
             SaleItem saleItem = SaleItem.builder()
@@ -73,6 +78,7 @@ public class SaleServiceImpl implements SaleService {
                     .unitPrice(unitPrice)
                     .subtotal(subtotal)
                     .sale(sale)
+                    .stockLocation(itemRequest.getStockLocation())
                     .build();
 
             saleItems.add(saleItem);
@@ -80,19 +86,18 @@ public class SaleServiceImpl implements SaleService {
         }
 
         BigDecimal discount = Optional.ofNullable(request.getDiscountAmount()).orElse(BigDecimal.ZERO);
-        sale.setCode(documentCounterService.generateNextCode("SALE", "SALE"));
+        BigDecimal totalAmount = total.subtract(discount);
+        if (sale.getPaidAmount().compareTo(sale.getTotalAmount()) < 0) {
+            throw new BusinessException(ErrorCode.SALE_PAID_LESS_THAN_TOTAL);
+        }
 
+        sale.setCode(documentCounterService.generateNextCode(DocumentType.SALE));
         sale.setItems(saleItems);
         sale.setPaymentType(request.getPaymentType());
         sale.setSubtotalAmount(total);
         sale.setDiscountAmount(discount);
-        sale.setTotalAmount(total.subtract(discount));
+        sale.setTotalAmount(totalAmount);
         sale.setPaidAmount(request.getPaidAmount());
-
-        if (sale.getPaidAmount().compareTo(sale.getTotalAmount()) < 0) {
-            throw new ResponseStatusException(ErrorCode.SALE_PAID_LESS_THAN_TOTAL.getStatus(),
-                    ErrorCode.SALE_PAID_LESS_THAN_TOTAL.getMessage());
-        }
 
         Sale savedSale = saleRepository.save(sale);
         stockMovementService.recordSaleMovements(savedSale);

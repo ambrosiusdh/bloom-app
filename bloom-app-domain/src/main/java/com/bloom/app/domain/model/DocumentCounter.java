@@ -1,5 +1,6 @@
 package com.bloom.app.domain.model;
 
+import com.bloom.app.domain.enums.DocumentType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -15,7 +16,7 @@ import lombok.Setter;
 
 @Entity
 @Table(name = "document_counters", uniqueConstraints = {
-        @UniqueConstraint(columnNames = { "document_type", "year", "month" })
+    @UniqueConstraint(columnNames = { "document_type", "year", "month" })
 })
 @Getter
 @Setter
@@ -23,13 +24,12 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 public class DocumentCounter {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(name = "document_type", nullable = false)
-    private String documentType;
+    private DocumentType documentType;
 
     @Column(name = "year", nullable = false)
     private Integer year;

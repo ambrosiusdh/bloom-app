@@ -18,6 +18,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.FetchType;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -41,8 +45,15 @@ public class GoodsReceipt {
     @Column(name = "received_date", nullable = false)
     private Instant receivedDate;
 
-    @Column(name = "supplier_name")
-    private String supplierName;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "supplier_id", nullable = false)
+    private Supplier supplier;
+
+    @Column(name = "total_amount", nullable = false)
+    private BigDecimal totalAmount;
+
+    @Column(name = "paid_amount", nullable = false)
+    private BigDecimal paidAmount;
 
     @Column(name = "description")
     private String description;

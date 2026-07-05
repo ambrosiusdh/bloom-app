@@ -1,11 +1,14 @@
 package com.bloom.app.service.impl;
 
 import com.bloom.app.api.dto.request.stockadjustment.CreateStockAdjustmentRequest;
+import com.bloom.app.domain.enums.DocumentType;
+import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.api.dto.request.stockadjustment.FilterStockAdjustmentRequest;
 import com.bloom.app.api.dto.request.stockadjustment.StockAdjustmentItemRequest;
 import com.bloom.app.api.dto.response.stockadjustment.CsvParseResponse;
 import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.StockAdjustment;
 import com.bloom.app.domain.model.StockAdjustmentItem;
@@ -52,29 +55,26 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
         log.debug("StockAdjustmentService createStockAdjustment with request: {}", request);
 
         StockAdjustment stockAdjustment = stockAdjustmentMapper.createRequestToEntity(request);
-        stockAdjustment.setStockAdjustmentCode(documentCounterService.generateNextCode("STOCK_ADJUSTMENT", "SA"));
-
         List<StockAdjustmentItem> stockAdjustmentItems = new ArrayList<>();
 
         for (StockAdjustmentItemRequest itemRequest : request.getItems()) {
             Item item = itemRepository.findItemBySku(itemRequest.getItemSku())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                            "Item not found: " + itemRequest.getItemSku()));
+                    .orElseThrow(() -> new ResourceNotFoundException("Item not found: " + itemRequest.getItemSku()));
 
-            int previousStock = item.getStockQuantity();
+            int previousStock = (itemRequest.getStockLocation() == StockLocation.STORE)
+                    ? (item.getStockStore() != null ? item.getStockStore() : 0)
+                    : (item.getStockWarehouse() != null ? item.getStockWarehouse() : 0);
             int changeQuantity = itemRequest.getChangeQuantity();
-            int newStock;
-
-            if (itemRequest.getActionType() == StockAdjustmentActionType.ADD) {
-                newStock = previousStock + changeQuantity;
-            } else if (itemRequest.getActionType() == StockAdjustmentActionType.REMOVE) {
-                newStock = previousStock - changeQuantity;
-            } else if (itemRequest.getActionType() == StockAdjustmentActionType.CORRECTION) {
-                newStock = changeQuantity; // Correction sets the absolute value
-                changeQuantity = newStock - previousStock; // Calculate delta
-            } else {
-                newStock = previousStock;
-            }
+            int newStock = switch (itemRequest.getActionType()) {
+                case ADD -> previousStock + changeQuantity;
+                case REMOVE -> previousStock - changeQuantity;
+                case CORRECTION -> {
+                    int absoluteValue = changeQuantity;
+                    // Recalculate delta for stock movement history later in the code
+                    changeQuantity = absoluteValue - previousStock;
+                    yield absoluteValue; // 'yield' returns the value from a multi-line block
+                }
+            };
 
             StockAdjustmentItem stockAdjustmentItem = StockAdjustmentItem.builder()
                     .stockAdjustment(stockAdjustment)
@@ -83,12 +83,14 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                     .changeQuantity(changeQuantity)
                     .previousStock(previousStock)
                     .newStock(newStock)
+                    .stockLocation(itemRequest.getStockLocation())
                     .build();
 
             stockAdjustmentItems.add(stockAdjustmentItem);
         }
 
         stockAdjustment.setItems(stockAdjustmentItems);
+        stockAdjustment.setStockAdjustmentCode(documentCounterService.generateNextCode(DocumentType.STOCK_ADJUSTMENT));
         StockAdjustment savedStockAdjustment = stockAdjustmentRepository.save(stockAdjustment);
 
         // Trigger generic movement logic

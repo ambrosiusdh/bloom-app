@@ -1,5 +1,6 @@
 package com.bloom.app.service.impl;
 
+import com.bloom.app.domain.enums.DocumentType;
 import com.bloom.app.domain.enums.RomanMonth;
 import com.bloom.app.domain.model.DocumentCounter;
 import com.bloom.app.persistence.repository.DocumentCounterRepository;
@@ -18,7 +19,7 @@ public class DocumentCounterServiceImpl implements DocumentCounterService {
     private final DocumentCounterRepository documentCounterRepository;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public String generateNextCode(String documentType, String prefix) {
+    public String generateNextCode(DocumentType documentType) {
         YearMonth currentYearMonth = YearMonth.now();
         int year = currentYearMonth.getYear();
         int month = currentYearMonth.getMonthValue();
@@ -35,6 +36,6 @@ public class DocumentCounterServiceImpl implements DocumentCounterService {
         documentCounterRepository.save(documentCounter);
 
         String romanMonth = RomanMonth.fromNumber(month);
-        return String.format("%s/%s-%d/%04d", prefix, romanMonth, year, documentCounter.getCurrentSequence());
+        return String.format("%s/%s-%d/%04d", documentType.getDocumentPrefix(), romanMonth, year, documentCounter.getCurrentSequence());
     }
 }

@@ -1,6 +1,17 @@
 package com.bloom.app.domain.model;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -11,6 +22,7 @@ import org.springframework.data.annotation.LastModifiedBy;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Data
@@ -22,7 +34,7 @@ import java.time.Instant;
 @Table(
     name = "items",
     indexes = {
-        @Index(name = "idx_items_category_id", columnList = "category_id")
+        @Index(name = "idx_items_category_id", columnList = "item_category_id")
     }
 )
 public class Item {
@@ -36,8 +48,16 @@ public class Item {
     private String sku;
 
     private String description;
-    private Double price;
-    private Integer stockQuantity;
+    private BigDecimal price;
+
+    @Column(name = "stock_store", nullable = false)
+    @Builder.Default
+    private Integer stockStore = 0;
+
+    @Column(name = "stock_warehouse", nullable = false)
+    @Builder.Default
+    private Integer stockWarehouse = 0;
+
     private boolean active;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -58,4 +78,8 @@ public class Item {
 
     @Version
     private long version;
+
+    public Integer getTotalStock() {
+        return (this.stockStore == null ? 0 : this.stockStore) + (this.stockWarehouse == null ? 0 : this.stockWarehouse);
+    }
 }
