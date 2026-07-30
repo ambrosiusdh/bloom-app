@@ -34,6 +34,10 @@ public class SaleItem {
     private StockLocation stockLocation;
 
     private Integer quantity;
+
+    @Column(precision = 19, scale = 4)
     private BigDecimal unitPrice;
+
+    @Column(precision = 19, scale = 4)
     private BigDecimal subtotal;
 }
