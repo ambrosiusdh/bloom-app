@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 
 import java.math.BigDecimal;
+import com.bloom.app.domain.model.UnitOfMeasure;
 
 @Data
 @AllArgsConstructor
@@ -19,6 +20,8 @@ public class ItemResponse {
     private String sku;
     private String description;
     private BigDecimal price;
+    private UnitOfMeasure baseUnitOfMeasure;
+    private boolean fractionalQuantityAllowed;
     private Integer stockQuantity;
     private Integer stockStore;
     private Integer stockWarehouse;
