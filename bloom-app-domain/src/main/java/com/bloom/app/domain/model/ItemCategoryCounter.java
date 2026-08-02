@@ -9,7 +9,6 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
-import jakarta.persistence.Version;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -37,6 +36,4 @@ public class ItemCategoryCounter {
     @Column(name = "current_sequence", nullable = false)
     private long currentSequence;
 
-    @Version
-    private long version;
 }

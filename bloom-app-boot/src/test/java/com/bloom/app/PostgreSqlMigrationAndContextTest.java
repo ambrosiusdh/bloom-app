@@ -69,7 +69,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsLegacyStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse
@@ -88,6 +88,9 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(tableExists("suppliers")).isTrue();
         assertThat(tableExists("cash_sessions")).isTrue();
         assertThat(tableExists("expenses")).isTrue();
+        assertThat(columnExists("cash_sessions", "version")).isTrue();
+        assertThat(columnExists("expenses", "version")).isTrue();
+        assertThat(columnExists("item_category_counters", "version")).isFalse();
 
         assertThat(numericScale("items", "price")).isEqualTo(4);
         assertThat(numericScale("sales", "subtotal_amount")).isEqualTo(4);

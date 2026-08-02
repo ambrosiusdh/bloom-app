@@ -4,14 +4,16 @@ import com.bloom.app.domain.enums.CashSessionStatus;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -43,4 +45,7 @@ public class CashSession {
 
     @Column(name = "closed_at")
     private Instant closedAt;
+
+    @Version
+    private Long version;
 }
