@@ -8,7 +8,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -16,9 +15,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "item_category_counters", uniqueConstraints = {
-    @UniqueConstraint(columnNames = { "item_category_id", "current_sequence" })
-})
+@Table(name = "item_category_counters")
 @Getter
 @Setter
 @Builder

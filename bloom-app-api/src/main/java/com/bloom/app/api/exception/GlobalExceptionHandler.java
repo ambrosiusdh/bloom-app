@@ -4,6 +4,7 @@ import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -80,6 +81,17 @@ public class GlobalExceptionHandler {
         body.put("errorType", ex.getClass().getSimpleName());
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<?> handleOptimisticLockingFailure(OptimisticLockingFailureException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", false);
+        body.put("message", "The resource was modified by another transaction. Reload and retry.");
+        body.put("code", HttpStatus.CONFLICT.value());
+        body.put("errorType", ex.getClass().getSimpleName());
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 
     @ExceptionHandler(Exception.class)
