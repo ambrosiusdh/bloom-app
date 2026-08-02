@@ -16,6 +16,7 @@ import org.mapstruct.NullValuePropertyMappingStrategy;
 )
 public interface ItemMapper {
     @Mapping(target = "category", source = "category")
+    @Mapping(target = "stockQuantity", source = "totalStock")
     ItemResponse itemToItemResponse(Item item);
 
     @Mapping(target = "active", expression = "java(true)")

@@ -15,6 +15,7 @@ import com.bloom.app.service.ItemService;
 import com.bloom.app.service.mapper.ItemMapper;
 import com.bloom.app.service.specification.ItemSpecification;
 import com.bloom.app.service.util.PdfGeneratorUtil;
+import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +53,9 @@ public class ItemServiceImpl implements ItemService {
         }
 
         Item item = itemMapper.createRequestToEntity(request);
+        boolean fractionalQuantityAllowed = Boolean.TRUE.equals(request.getFractionalQuantityAllowed());
+        InventoryQuantityValidator.validateStock(request.getStockStore(), fractionalQuantityAllowed);
+        InventoryQuantityValidator.validateStock(request.getStockWarehouse(), fractionalQuantityAllowed);
         item.setCategory(itemCategory);
         item.setSku(sku);
         return itemMapper.itemToItemResponse(itemRepository.save(item));
@@ -64,6 +68,8 @@ public class ItemServiceImpl implements ItemService {
         Item item = itemRepository.findItemBySku(sku)
             .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
         itemMapper.updateRequestToEntity(request, item);
+        InventoryQuantityValidator.validateStock(item.getStockStore(), item.isFractionalQuantityAllowed());
+        InventoryQuantityValidator.validateStock(item.getStockWarehouse(), item.isFractionalQuantityAllowed());
         return itemMapper.itemToItemResponse(itemRepository.save(item));
     }
 

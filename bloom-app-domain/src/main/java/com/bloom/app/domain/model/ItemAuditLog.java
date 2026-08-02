@@ -1,7 +1,6 @@
 package com.bloom.app.domain.model;
 
 import com.bloom.app.domain.enums.MovementSourceType;
-import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
@@ -23,6 +22,7 @@ import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Getter
@@ -42,14 +42,14 @@ public class ItemAuditLog {
     @JoinColumn(name = "item_id", nullable = false)
     private Item item;
 
-    @Column(name = "qty", nullable = false)
-    private Integer qty;
+    @Column(name = "qty", nullable = false, precision = 19, scale = 4)
+    private BigDecimal qty;
 
-    @Column(name = "qty_before", nullable = false)
-    private Integer qtyBefore;
+    @Column(name = "qty_before", nullable = false, precision = 19, scale = 4)
+    private BigDecimal qtyBefore;
 
-    @Column(name = "qty_after", nullable = false)
-    private Integer qtyAfter;
+    @Column(name = "qty_after", nullable = false, precision = 19, scale = 4)
+    private BigDecimal qtyAfter;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "source", nullable = false)

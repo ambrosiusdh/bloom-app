@@ -16,8 +16,10 @@ import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.SaleRepository;
 import com.bloom.app.service.ExcelExportService;
 import com.bloom.app.service.SaleService;
+import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.mapper.SaleMapper;
 import com.bloom.app.service.specification.SaleSpecification;
+import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +32,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -44,7 +47,7 @@ public class SaleServiceImpl implements SaleService {
     private final ItemRepository itemRepository;
     private final SaleMapper saleMapper;
     private final ExcelExportService excelExportService;
-    private final StockMovementServiceImpl stockMovementService;
+    private final StockMovementService stockMovementService;
     private final DocumentCounterServiceImpl documentCounterService;
 
     @Override
@@ -62,15 +65,17 @@ public class SaleServiceImpl implements SaleService {
         for (CreateSaleItemRequest itemRequest : request.getSaleItemList()) {
             Item item = itemRepository.findItemBySku(itemRequest.getItemSku())
                     .orElseThrow(() -> new ResourceNotFoundException("Item not found: " + itemRequest.getItemSku()));
-            Integer stockQuantity = itemRequest.getStockLocation().equals(StockLocation.STORE)
+            InventoryQuantityValidator.validateIncoming(
+                itemRequest.getQuantity(), item.isFractionalQuantityAllowed());
+            BigDecimal stockQuantity = itemRequest.getStockLocation().equals(StockLocation.STORE)
                 ? item.getStockStore() : item.getStockWarehouse();
 
-            if (stockQuantity < itemRequest.getQuantity()) {
+            if (stockQuantity.compareTo(itemRequest.getQuantity()) < 0) {
                 throw new BusinessException(ErrorCode.SALE_INSUFFICIENT_STOCK_STORE, item.getName(), itemRequest.getStockLocation());
             }
 
             BigDecimal unitPrice = item.getPrice();
-            BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(itemRequest.getQuantity()));
+            BigDecimal subtotal = unitPrice.multiply(itemRequest.getQuantity()).setScale(4, RoundingMode.HALF_UP);
 
             SaleItem saleItem = SaleItem.builder()
                     .item(item)

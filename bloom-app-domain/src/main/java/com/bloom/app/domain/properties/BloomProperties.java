@@ -6,11 +6,13 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.math.BigDecimal;
+
 @ConfigurationProperties(prefix = "bloom")
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
 public class BloomProperties {
-    private Integer lowStockThreshold;
+    private BigDecimal lowStockThreshold;
 }

@@ -15,7 +15,7 @@ import com.bloom.app.domain.enums.StockLocation;
 @AllArgsConstructor
 public class GoodsReceiptItemResponse {
     private ItemResponse item;
-    private Integer quantity;
+    private BigDecimal quantity;
     private BigDecimal purchasePrice;
     private StockLocation stockLocation;
 }

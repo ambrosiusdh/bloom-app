@@ -7,12 +7,14 @@ import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.StockAdjustment;
 
+import java.math.BigDecimal;
+
 public interface StockMovementService {
     void recordMovement(
         MovementSourceType sourceType,
         Long sourceId,
         Item item,
-        int quantity,
+        BigDecimal quantity,
         MovementType movementType,
         String referenceNo,
         StockLocation stockLocation

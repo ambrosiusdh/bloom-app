@@ -35,7 +35,8 @@ public class SaleItem {
     @Column(name = "stock_location", nullable = false)
     private StockLocation stockLocation;
 
-    private Integer quantity;
+    @Column(nullable = false, precision = 19, scale = 4)
+    private BigDecimal quantity;
 
     @Column(precision = 19, scale = 4)
     private BigDecimal unitPrice;

@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import jakarta.validation.constraints.PositiveOrZero;
 
 import java.math.BigDecimal;
 import com.bloom.app.domain.model.UnitOfMeasure;
@@ -19,6 +20,8 @@ public class UpdateItemRequest {
     private BigDecimal price;
     private UnitOfMeasure baseUnitOfMeasure;
     private Boolean fractionalQuantityAllowed;
-    private Integer stockStore;
-    private Integer stockWarehouse;
+    @PositiveOrZero
+    private BigDecimal stockStore;
+    @PositiveOrZero
+    private BigDecimal stockWarehouse;
 }

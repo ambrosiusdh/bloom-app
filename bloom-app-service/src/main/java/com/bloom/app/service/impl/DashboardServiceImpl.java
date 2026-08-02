@@ -62,18 +62,19 @@ public class DashboardServiceImpl implements DashboardService {
             .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         long todayOrders = todaySales.size();
-        long totalItemsSold = todaySales.stream()
-            .mapToLong(sale -> sale.getItems().stream().mapToInt(SaleItem::getQuantity).sum())
-            .sum();
+        BigDecimal totalItemsSold = todaySales.stream()
+            .flatMap(sale -> sale.getItems().stream())
+            .map(SaleItem::getQuantity)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         return List.of(
             createSummaryCard("Total Pendapatan", todayRevenue, true),
-            createSummaryCard("Total Pesanan", BigDecimal.valueOf(totalItemsSold), false),
+            createSummaryCard("Total Pesanan", totalItemsSold, false),
             createSummaryCard("Total Transaksi", BigDecimal.valueOf(todayOrders), false));
     }
 
     private SummaryDto createSummaryCard(String label, BigDecimal current, boolean isCurrency) {
-        String value = isCurrency ? String.format("Rp. %,.0f", current) : String.valueOf(current.intValue());
+        String value = isCurrency ? String.format("Rp. %,.0f", current) : current.stripTrailingZeros().toPlainString();
 
         return SummaryDto.builder()
             .label(label)

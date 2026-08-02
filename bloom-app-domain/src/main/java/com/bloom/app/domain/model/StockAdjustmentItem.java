@@ -20,6 +20,8 @@ import lombok.Setter;
 
 import com.bloom.app.domain.enums.StockLocation;
 
+import java.math.BigDecimal;
+
 @Getter
 @Setter
 @Entity
@@ -44,14 +46,14 @@ public class StockAdjustmentItem {
     @Column(name = "action_type", nullable = false)
     private StockAdjustmentActionType actionType;
 
-    @Column(name = "change_quantity", nullable = false)
-    private Integer changeQuantity;
+    @Column(name = "change_quantity", nullable = false, precision = 19, scale = 4)
+    private BigDecimal changeQuantity;
 
-    @Column(name = "previous_stock", nullable = false)
-    private Integer previousStock;
+    @Column(name = "previous_stock", nullable = false, precision = 19, scale = 4)
+    private BigDecimal previousStock;
 
-    @Column(name = "new_stock", nullable = false)
-    private Integer newStock;
+    @Column(name = "new_stock", nullable = false, precision = 19, scale = 4)
+    private BigDecimal newStock;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "stock_location", nullable = false)

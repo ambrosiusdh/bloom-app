@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
+import java.math.BigDecimal;
 
 public interface ItemRepository extends JpaRepository<Item, Long>, JpaSpecificationExecutor<Item> {
     Optional<Item> findItemBySku(String sku);
@@ -17,7 +18,7 @@ public interface ItemRepository extends JpaRepository<Item, Long>, JpaSpecificat
 
     // TODO: improve this query, either total stock need to be recorded or else
     @Query("SELECT i FROM Item i WHERE (i.stockStore + i.stockWarehouse) < :quantity")
-    List<Item> findByStockQuantityLessThan(@Param("quantity") Integer quantity);
+    List<Item> findByStockQuantityLessThan(@Param("quantity") BigDecimal quantity);
 
     List<Item> findAllByCategory(ItemCategory category);
 

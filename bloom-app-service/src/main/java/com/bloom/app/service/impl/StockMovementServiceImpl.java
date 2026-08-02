@@ -3,19 +3,21 @@ package com.bloom.app.service.impl;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
-import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.model.*;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.ItemAuditLogRepository;
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.service.StockMovementService;
+import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.math.BigDecimal;
 
 @Slf4j
 @Service
@@ -35,7 +37,7 @@ public class StockMovementServiceImpl implements StockMovementService {
         MovementSourceType sourceType,
         Long sourceId,
         Item item,
-        int quantity,
+        BigDecimal quantity,
         MovementType movementType,
         String referenceNo,
         StockLocation stockLocation
@@ -43,26 +45,23 @@ public class StockMovementServiceImpl implements StockMovementService {
         log.debug("Recording movement: item={}, qty={}, type={}, source={}, location={}", item.getSku(), quantity, movementType,
                 sourceType, stockLocation);
 
-        if (quantity <= 0) {
-            throw new IllegalArgumentException(ErrorCode.ITEM_QUANTITY_MUST_BE_POSITIVE.getMessage());
-        }
+        InventoryQuantityValidator.validateIncoming(quantity, item.isFractionalQuantityAllowed());
 
-        int previousStock = (stockLocation == StockLocation.STORE)
-                ? (item.getStockStore() != null ? item.getStockStore() : 0)
-                : (item.getStockWarehouse() != null ? item.getStockWarehouse() : 0);
-        int newStock;
+        BigDecimal previousStock = (stockLocation == StockLocation.STORE)
+                ? (item.getStockStore() != null ? item.getStockStore() : BigDecimal.ZERO)
+                : (item.getStockWarehouse() != null ? item.getStockWarehouse() : BigDecimal.ZERO);
+        BigDecimal newStock;
 
         if (movementType == MovementType.IN) {
-            newStock = previousStock + quantity;
+            newStock = previousStock.add(quantity);
         } else {
-            newStock = previousStock - quantity;
-            if (newStock < 0) {
-                // Option: we could throw error if stock goes negative, or allow it.
-                // User requirement: "Validate stock does not go negative"
+            newStock = previousStock.subtract(quantity);
+            if (newStock.compareTo(BigDecimal.ZERO) < 0) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "Insufficient stock in " + stockLocation + " for item: " + item.getSku());
             }
         }
+        InventoryQuantityValidator.validateStock(newStock, item.isFractionalQuantityAllowed());
 
         // 1. Update Product Stock (Performance Optimization)
         if (stockLocation == StockLocation.STORE) {
@@ -117,7 +116,7 @@ public class StockMovementServiceImpl implements StockMovementService {
     public void recordManualAdjustment(StockAdjustment adjustment) {
         for (StockAdjustmentItem item : adjustment.getItems()) {
             MovementType type;
-            int qty = item.getChangeQuantity();
+            BigDecimal qty = item.getChangeQuantity();
 
             // Logic to determine IN/OUT based on ActionType
             // ADD -> IN
@@ -140,16 +139,16 @@ public class StockMovementServiceImpl implements StockMovementService {
                 // (it stores changeQuantity and newStock), we need to derive.
                 // If previous < new, it's IN.
                 // If previous > new, it's OUT.
-                if (item.getNewStock() > item.getPreviousStock()) {
+                if (item.getNewStock().compareTo(item.getPreviousStock()) > 0) {
                     type = MovementType.IN;
-                    qty = item.getNewStock() - item.getPreviousStock();
+                    qty = item.getNewStock().subtract(item.getPreviousStock());
                 } else {
                     type = MovementType.OUT;
-                    qty = item.getPreviousStock() - item.getNewStock();
+                    qty = item.getPreviousStock().subtract(item.getNewStock());
                 }
             }
 
-            if (qty > 0) { // Only record if there is a change
+            if (qty.compareTo(BigDecimal.ZERO) > 0) { // Only record if there is a change
                 recordMovement(
                     MovementSourceType.STOCK_ADJUSTMENT,
                     adjustment.getId(),
