@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import com.bloom.app.domain.model.UnitOfMeasure;
 
 @Data
 @AllArgsConstructor
@@ -24,6 +25,13 @@ public class CreateItemRequest {
 
     @NotNull
     private BigDecimal price;
+
+    @NotNull
+    private UnitOfMeasure baseUnitOfMeasure;
+
+    @NotNull
+    @Builder.Default
+    private Boolean fractionalQuantityAllowed = false;
 
     @NotNull
     @Builder.Default

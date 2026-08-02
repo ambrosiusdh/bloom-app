@@ -12,6 +12,8 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -52,6 +54,14 @@ public class Item {
     private String description;
     @Column(precision = 19, scale = 4)
     private BigDecimal price;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "base_unit_of_measure", nullable = false, length = 30)
+    private UnitOfMeasure baseUnitOfMeasure;
+
+    @Column(name = "fractional_quantity_allowed", nullable = false)
+    @Builder.Default
+    private boolean fractionalQuantityAllowed = false;
 
     @Column(name = "stock_store", nullable = false)
     @Builder.Default
