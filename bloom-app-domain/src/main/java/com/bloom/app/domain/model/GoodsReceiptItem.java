@@ -45,7 +45,7 @@ public class GoodsReceiptItem {
     @Column(name = "quantity", nullable = false)
     private Integer quantity;
 
-    @Column(name = "purchase_price", nullable = false)
+    @Column(name = "purchase_price", nullable = false, precision = 19, scale = 4)
     private BigDecimal purchasePrice;
 
     @Enumerated(EnumType.STRING)

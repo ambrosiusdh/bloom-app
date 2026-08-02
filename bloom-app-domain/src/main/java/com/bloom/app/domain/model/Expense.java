@@ -26,10 +26,10 @@ public class Expense {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "cash_session_id")
+    @JoinColumn(name = "cash_session_id", nullable = false)
     private CashSession cashSession;
 
-    @Column(nullable = false)
+    @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal amount;
 
     @Enumerated(EnumType.STRING)

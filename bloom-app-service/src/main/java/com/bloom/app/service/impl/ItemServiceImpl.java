@@ -101,7 +101,7 @@ public class ItemServiceImpl implements ItemService {
     @Transactional
     @Override
     public String generateSku(ItemCategory itemCategory) {
-        ItemCategoryCounter itemCategoryCounter = itemCategoryCounterRepository.findByCategory(itemCategory)
+        ItemCategoryCounter itemCategoryCounter = itemCategoryCounterRepository.findByItemCategory(itemCategory)
             .orElseGet(() -> ItemCategoryCounter.builder()
                 .itemCategory(itemCategory)
                 .currentSequence(0)

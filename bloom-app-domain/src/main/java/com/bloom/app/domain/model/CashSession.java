@@ -27,10 +27,10 @@ public class CashSession {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "opening_cash", nullable = false)
+    @Column(name = "opening_cash", nullable = false, precision = 19, scale = 4)
     private BigDecimal openingCash;
 
-    @Column(name = "closing_cash")
+    @Column(name = "closing_cash", precision = 19, scale = 4)
     private BigDecimal closingCash;
 
     @Enumerated(EnumType.STRING)

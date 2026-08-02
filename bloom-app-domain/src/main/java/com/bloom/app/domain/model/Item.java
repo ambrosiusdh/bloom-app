@@ -48,6 +48,7 @@ public class Item {
     private String sku;
 
     private String description;
+    @Column(precision = 19, scale = 4)
     private BigDecimal price;
 
     @Column(name = "stock_store", nullable = false)
