@@ -14,8 +14,9 @@ import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedBy;
@@ -25,7 +26,8 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.math.BigDecimal;
 import java.time.Instant;
 
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -78,7 +80,7 @@ public class Item {
     private String updatedBy;
 
     @Version
-    private long version;
+    private Long version;
 
     public Integer getTotalStock() {
         return (this.stockStore == null ? 0 : this.stockStore) + (this.stockWarehouse == null ? 0 : this.stockWarehouse);

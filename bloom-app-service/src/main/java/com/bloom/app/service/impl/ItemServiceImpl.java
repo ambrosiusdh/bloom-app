@@ -8,7 +8,6 @@ import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
-import com.bloom.app.domain.model.ItemCategoryCounter;
 import com.bloom.app.persistence.repository.ItemCategoryCounterRepository;
 import com.bloom.app.persistence.repository.ItemCategoryRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
@@ -101,18 +100,8 @@ public class ItemServiceImpl implements ItemService {
     @Transactional
     @Override
     public String generateSku(ItemCategory itemCategory) {
-        ItemCategoryCounter itemCategoryCounter = itemCategoryCounterRepository.findByItemCategory(itemCategory)
-            .orElseGet(() -> ItemCategoryCounter.builder()
-                .itemCategory(itemCategory)
-                .currentSequence(0)
-                .build()
-            );
-        long nextSequence = itemCategoryCounter.getCurrentSequence() + 1;
-        String sku = String.format("%s-%05d", itemCategory.getCode(), nextSequence);
-
-        itemCategoryCounter.setCurrentSequence(nextSequence);
-        itemCategoryCounterRepository.save(itemCategoryCounter);
-        return sku;
+        long nextSequence = itemCategoryCounterRepository.incrementAndGetSequence(itemCategory.getId());
+        return String.format("%s-%05d", itemCategory.getCode(), nextSequence);
     }
 
     @Override

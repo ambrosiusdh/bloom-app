@@ -18,6 +18,12 @@ import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.LongStream;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -40,6 +46,9 @@ class PostgreSqlMigrationAndContextTest {
 
     @Autowired
     private DocumentCounterRepository documentCounterRepository;
+
+    @Autowired
+    private ItemCategoryCounterRepository itemCategoryCounterRepository;
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -69,7 +78,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsLegacyStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse
@@ -88,6 +97,17 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(tableExists("suppliers")).isTrue();
         assertThat(tableExists("cash_sessions")).isTrue();
         assertThat(tableExists("expenses")).isTrue();
+        assertThat(columnExists("cash_sessions", "version")).isTrue();
+        assertThat(columnExists("expenses", "version")).isTrue();
+        assertThat(columnExists("item_category_counters", "version")).isFalse();
+        assertThat(constraintExists(
+            "item_category_counters",
+            "uq_item_category_counters_category"
+        )).isTrue();
+        assertThat(constraintExists(
+            "item_category_counters",
+            "uq_item_category_counters_category_sequence"
+        )).isFalse();
 
         assertThat(numericScale("items", "price")).isEqualTo(4);
         assertThat(numericScale("sales", "subtotal_amount")).isEqualTo(4);
@@ -127,17 +147,60 @@ class PostgreSqlMigrationAndContextTest {
     }
 
     @Test
+    void allocatesItemCategorySequencesAtomically() {
+        String categoryCode = "CONCURRENT-" + UUID.randomUUID();
+        Long categoryId = jdbcTemplate.queryForObject(
+            """
+            INSERT INTO item_categories (name, code, active)
+            VALUES ('Concurrent allocation test', ?, TRUE)
+            RETURNING id
+            """,
+            Long.class,
+            categoryCode
+        );
+
+        int allocationCount = 12;
+        ExecutorService executor = Executors.newFixedThreadPool(6);
+        List<Long> allocatedSequences;
+        try {
+            List<CompletableFuture<Long>> allocations = Stream.generate(() ->
+                    CompletableFuture.supplyAsync(
+                        () -> itemCategoryCounterRepository.incrementAndGetSequence(categoryId),
+                        executor
+                    )
+                )
+                .limit(allocationCount)
+                .toList();
+
+            allocatedSequences = allocations.stream()
+                .map(CompletableFuture::join)
+                .toList();
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(allocatedSequences).containsExactlyInAnyOrderElementsOf(
+            LongStream.rangeClosed(1, allocationCount).boxed().toList()
+        );
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT current_sequence FROM item_category_counters WHERE item_category_id = ?",
+            Long.class,
+            categoryId
+        )).isEqualTo(allocationCount);
+    }
+
+    @Test
     void enforcesSingleGlobalOpenCashSessionAndRequiredExpenseSession() {
         assertThat(columnIsNullable("expenses", "cash_session_id")).isFalse();
 
         jdbcTemplate.update("""
-            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at)
-            VALUES (1, 100.0000, 'OPEN', CURRENT_TIMESTAMP)
+            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at, version)
+            VALUES (1, 100.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
             """);
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
-            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at)
-            VALUES (1, 200.0000, 'OPEN', CURRENT_TIMESTAMP)
+            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at, version)
+            VALUES (1, 200.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
             """))
             .isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -203,6 +266,24 @@ class PostgreSqlMigrationAndContextTest {
             Boolean.class,
             tableName,
             columnName
+        );
+        return Boolean.TRUE.equals(exists);
+    }
+
+    private boolean constraintExists(String tableName, String constraintName) {
+        Boolean exists = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.table_constraints
+                WHERE table_schema = 'public'
+                  AND table_name = ?
+                  AND constraint_name = ?
+            )
+            """,
+            Boolean.class,
+            tableName,
+            constraintName
         );
         return Boolean.TRUE.equals(exists);
     }
