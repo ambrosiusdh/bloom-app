@@ -134,13 +134,13 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(columnIsNullable("expenses", "cash_session_id")).isFalse();
 
         jdbcTemplate.update("""
-            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at)
-            VALUES (1, 100.0000, 'OPEN', CURRENT_TIMESTAMP)
+            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at, version)
+            VALUES (1, 100.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
             """);
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
-            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at)
-            VALUES (1, 200.0000, 'OPEN', CURRENT_TIMESTAMP)
+            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at, version)
+            VALUES (1, 200.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
             """))
             .isInstanceOf(DataIntegrityViolationException.class);
     }
