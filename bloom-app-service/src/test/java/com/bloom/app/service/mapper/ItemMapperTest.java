@@ -30,6 +30,10 @@ class ItemMapperTest {
             .build();
 
         Item item = mapper.createRequestToEntity(request);
+        assertThat(item.getStockStore()).isEqualByComparingTo("0");
+        assertThat(item.getStockWarehouse()).isEqualByComparingTo("0");
+        item.setStockStore(new java.math.BigDecimal("1.2500"));
+        item.setStockWarehouse(new java.math.BigDecimal("0.5000"));
         ItemResponse response = mapper.itemToItemResponse(item);
 
         assertThat(item.getBaseUnitOfMeasure()).isEqualTo(UnitOfMeasure.METER);
