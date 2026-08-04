@@ -5,6 +5,9 @@ import com.bloom.app.api.dto.request.item.FilterItemRequest;
 import com.bloom.app.api.dto.request.item.UpdateItemRequest;
 import com.bloom.app.api.dto.response.item.ItemResponse;
 import com.bloom.app.domain.error.ErrorCode;
+import com.bloom.app.domain.enums.MovementSourceType;
+import com.bloom.app.domain.enums.MovementType;
+import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
@@ -12,6 +15,7 @@ import com.bloom.app.persistence.repository.ItemCategoryCounterRepository;
 import com.bloom.app.persistence.repository.ItemCategoryRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.service.ItemService;
+import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.mapper.ItemMapper;
 import com.bloom.app.service.specification.ItemSpecification;
 import com.bloom.app.service.util.PdfGeneratorUtil;
@@ -26,6 +30,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.math.BigDecimal;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -37,6 +42,7 @@ public class ItemServiceImpl implements ItemService {
     private final ItemCategoryCounterRepository itemCategoryCounterRepository;
     private final ItemMapper itemMapper;
     private final PdfGeneratorUtil pdfGeneratorUtil;
+    private final StockMovementService stockMovementService;
 
     @Override
     @Transactional
@@ -58,7 +64,10 @@ public class ItemServiceImpl implements ItemService {
         InventoryQuantityValidator.validateStock(request.getStockWarehouse(), fractionalQuantityAllowed);
         item.setCategory(itemCategory);
         item.setSku(sku);
-        return itemMapper.itemToItemResponse(itemRepository.save(item));
+        Item savedItem = itemRepository.save(item);
+        recordOpeningBalance(savedItem, request.getStockStore(), StockLocation.STORE);
+        recordOpeningBalance(savedItem, request.getStockWarehouse(), StockLocation.WAREHOUSE);
+        return itemMapper.itemToItemResponse(savedItem);
     }
 
     @Override
@@ -145,5 +154,19 @@ public class ItemServiceImpl implements ItemService {
             .toList();
 
         return pdfGeneratorUtil.generateBarcodeLayoutPdf(sortedItems);
+    }
+
+    private void recordOpeningBalance(Item item, BigDecimal quantity, StockLocation stockLocation) {
+        if (quantity.compareTo(BigDecimal.ZERO) > 0) {
+            stockMovementService.recordMovement(
+                MovementSourceType.OPENING_BALANCE,
+                item.getId(),
+                item,
+                quantity,
+                MovementType.IN,
+                item.getSku(),
+                stockLocation
+            );
+        }
     }
 }

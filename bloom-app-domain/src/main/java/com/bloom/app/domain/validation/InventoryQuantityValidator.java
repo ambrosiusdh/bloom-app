@@ -17,10 +17,6 @@ public final class InventoryQuantityValidator {
         validateFractionalRule(quantity, fractionalQuantityAllowed);
     }
 
-    public static void validateIncoming(BigDecimal quantity) {
-        validateIncoming(quantity, true);
-    }
-
     public static void validateStock(BigDecimal stock, boolean fractionalQuantityAllowed) {
         validateRequiredAndScale(stock);
         if (stock.compareTo(BigDecimal.ZERO) < 0) {

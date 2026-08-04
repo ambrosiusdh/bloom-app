@@ -23,6 +23,7 @@ import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
@@ -70,8 +71,8 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                     ? (item.getStockStore() != null ? item.getStockStore() : BigDecimal.ZERO)
                     : (item.getStockWarehouse() != null ? item.getStockWarehouse() : BigDecimal.ZERO);
             BigDecimal requestedQuantity = itemRequest.getChangeQuantity();
-            InventoryQuantityValidator.validateIncoming(
-                requestedQuantity, item.isFractionalQuantityAllowed());
+            validateAdjustmentQuantity(
+                requestedQuantity, itemRequest.getActionType(), item.isFractionalQuantityAllowed());
             BigDecimal changeQuantity = requestedQuantity;
             BigDecimal newStock = switch (itemRequest.getActionType()) {
                 case ADD -> previousStock.add(changeQuantity);
@@ -138,25 +139,31 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
 
         try {
             String filename = file.getOriginalFilename();
-            if (filename != null && (filename.endsWith(".xls") || filename.endsWith(".xlsx"))) {
+            String normalizedFilename = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
+            if (normalizedFilename.endsWith(".xls") || normalizedFilename.endsWith(".xlsx")) {
                 try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
                     Sheet sheet = workbook.getSheetAt(0);
                     DataFormatter dataFormatter = new DataFormatter(Locale.ROOT);
                     for (Row row : sheet) {
                         if (row.getRowNum() == 0)
                             continue; // Skip header
+                        if (isBlankRow(row, dataFormatter))
+                            continue;
+                        int rowNumber = row.getRowNum() + 1;
                         // Expected columns: ItemSku, ChangeQuantity, ActionType, Reason
-                        String itemSku = row.getCell(0).getStringCellValue();
-                        BigDecimal changeQuantity = new BigDecimal(
-                            dataFormatter.formatCellValue(row.getCell(1)).trim());
-                        InventoryQuantityValidator.validateIncoming(changeQuantity);
-                        String actionTypeStr = row.getCell(2).getStringCellValue();
-                        String reason = row.getCell(3).getStringCellValue();
+                        String itemSku = requiredCellText(row, 0, "ItemSku", dataFormatter, rowNumber);
+                        String quantityText = requiredCellText(
+                            row, 1, "ChangeQuantity", dataFormatter, rowNumber);
+                        StockAdjustmentActionType actionType = parseActionType(
+                            requiredCellText(row, 2, "ActionType", dataFormatter, rowNumber), rowNumber);
+                        BigDecimal changeQuantity = parseAdjustmentQuantity(
+                            quantityText, actionType, rowNumber);
+                        String reason = optionalCellText(row, 3, dataFormatter);
 
                         responseList.add(CsvParseResponse.builder()
                                 .itemSku(itemSku)
                                 .changeQuantity(changeQuantity)
-                                .actionType(StockAdjustmentActionType.valueOf(actionTypeStr))
+                                .actionType(actionType)
                                 .reason(reason)
                                 .build());
                     }
@@ -165,34 +172,145 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream()))) {
                     String line;
                     boolean isFirstLine = true;
+                    int rowNumber = 0;
                     while ((line = reader.readLine()) != null) {
+                        rowNumber++;
                         if (isFirstLine) {
                             isFirstLine = false;
                             continue;
                         }
-                        String[] data = line.split(",");
+                        if (line.isBlank())
+                            continue;
+                        List<String> data = parseCsvLine(line, rowNumber);
+                        if (data.size() < 3 || data.size() > 4) {
+                            throw new IllegalArgumentException(
+                                "Row " + rowNumber + ": expected 3 or 4 columns");
+                        }
                         // Expected columns: ItemSku, ChangeQuantity, ActionType, Reason
-                        String itemSku = data[0];
-                        BigDecimal changeQuantity = new BigDecimal(data[1].trim());
-                        InventoryQuantityValidator.validateIncoming(changeQuantity);
-                        String actionTypeStr = data[2];
-                        String reason = data.length > 3 ? data[3] : null;
+                        String itemSku = requiredText(data.get(0), "ItemSku", rowNumber);
+                        StockAdjustmentActionType actionType = parseActionType(
+                            requiredText(data.get(2), "ActionType", rowNumber), rowNumber);
+                        BigDecimal changeQuantity = parseAdjustmentQuantity(
+                            requiredText(data.get(1), "ChangeQuantity", rowNumber), actionType, rowNumber);
+                        String reason = data.size() > 3 && !data.get(3).isBlank()
+                            ? data.get(3).trim() : null;
 
                         responseList.add(CsvParseResponse.builder()
                                 .itemSku(itemSku)
                                 .changeQuantity(changeQuantity)
-                                .actionType(StockAdjustmentActionType.valueOf(actionTypeStr))
+                                .actionType(actionType)
                                 .reason(reason)
                                 .build());
                     }
                 }
             }
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid CSV/Excel stock adjustment input: {}", e.getMessage());
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Failed to parse file: " + e.getMessage());
         } catch (Exception e) {
             log.error("Failed to parse CSV/Excel file", e);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Failed to parse file: " + e.getMessage());
         }
 
         return responseList;
+    }
+
+    private void validateAdjustmentQuantity(
+            BigDecimal quantity,
+            StockAdjustmentActionType actionType,
+            boolean fractionalQuantityAllowed) {
+        if (actionType == StockAdjustmentActionType.CORRECTION) {
+            InventoryQuantityValidator.validateStock(quantity, fractionalQuantityAllowed);
+        } else {
+            InventoryQuantityValidator.validateIncoming(quantity, fractionalQuantityAllowed);
+        }
+    }
+
+    private BigDecimal parseAdjustmentQuantity(
+            String value, StockAdjustmentActionType actionType, int rowNumber) {
+        BigDecimal quantity;
+        try {
+            quantity = new BigDecimal(value);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                "Row " + rowNumber + ": ChangeQuantity must be a plain decimal number", e);
+        }
+
+        try {
+            validateAdjustmentQuantity(quantity, actionType, true);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Row " + rowNumber + ": " + e.getMessage(), e);
+        }
+        return quantity;
+    }
+
+    private StockAdjustmentActionType parseActionType(String value, int rowNumber) {
+        try {
+            return StockAdjustmentActionType.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                "Row " + rowNumber + ": invalid ActionType '" + value + "'", e);
+        }
+    }
+
+    private boolean isBlankRow(Row row, DataFormatter dataFormatter) {
+        for (int column = 0; column < 4; column++) {
+            if (optionalCellText(row, column, dataFormatter) != null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String requiredCellText(
+            Row row, int column, String field, DataFormatter dataFormatter, int rowNumber) {
+        String value = optionalCellText(row, column, dataFormatter);
+        return requiredText(value, field, rowNumber);
+    }
+
+    private String optionalCellText(Row row, int column, DataFormatter dataFormatter) {
+        Cell cell = row.getCell(column, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL);
+        if (cell == null) {
+            return null;
+        }
+        String value = dataFormatter.formatCellValue(cell).trim();
+        return value.isBlank() ? null : value;
+    }
+
+    private String requiredText(String value, String field, int rowNumber) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Row " + rowNumber + ": " + field + " is required");
+        }
+        return value.trim();
+    }
+
+    private List<String> parseCsvLine(String line, int rowNumber) {
+        List<String> fields = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean quoted = false;
+
+        for (int index = 0; index < line.length(); index++) {
+            char character = line.charAt(index);
+            if (character == '"') {
+                if (quoted && index + 1 < line.length() && line.charAt(index + 1) == '"') {
+                    current.append('"');
+                    index++;
+                } else {
+                    quoted = !quoted;
+                }
+            } else if (character == ',' && !quoted) {
+                fields.add(current.toString());
+                current.setLength(0);
+            } else {
+                current.append(character);
+            }
+        }
+
+        if (quoted) {
+            throw new IllegalArgumentException("Row " + rowNumber + ": unterminated quoted field");
+        }
+        fields.add(current.toString());
+        return fields;
     }
 
     @Override

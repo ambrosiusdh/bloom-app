@@ -20,8 +20,12 @@ public interface ItemMapper {
     ItemResponse itemToItemResponse(Item item);
 
     @Mapping(target = "active", expression = "java(true)")
+    @Mapping(target = "stockStore", ignore = true)
+    @Mapping(target = "stockWarehouse", ignore = true)
     Item createRequestToEntity(CreateItemRequest request);
 
+    @Mapping(target = "stockStore", ignore = true)
+    @Mapping(target = "stockWarehouse", ignore = true)
     void updateRequestToEntity(UpdateItemRequest request, @MappingTarget Item item);
 
 }
