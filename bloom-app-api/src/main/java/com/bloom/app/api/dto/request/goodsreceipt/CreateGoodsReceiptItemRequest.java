@@ -1,8 +1,8 @@
 package com.bloom.app.api.dto.request.goodsreceipt;
 
 import com.bloom.app.domain.enums.StockLocation;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -20,8 +20,8 @@ public class CreateGoodsReceiptItemRequest {
     private String itemSku;
 
     @NotNull(message = "Quantity is required")
-    @Min(value = 1, message = "Quantity must be at least 1")
-    private Integer quantity;
+    @Positive(message = "Quantity must be positive")
+    private BigDecimal quantity;
 
     @NotNull(message = "Purchase price is required")
     private BigDecimal purchasePrice;

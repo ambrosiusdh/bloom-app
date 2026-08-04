@@ -22,9 +22,9 @@ public class ItemResponse {
     private BigDecimal price;
     private UnitOfMeasure baseUnitOfMeasure;
     private boolean fractionalQuantityAllowed;
-    private Integer stockQuantity;
-    private Integer stockStore;
-    private Integer stockWarehouse;
+    private BigDecimal stockQuantity;
+    private BigDecimal stockStore;
+    private BigDecimal stockWarehouse;
     private ItemCategoryResponse category;
 
     private Instant createdAt;

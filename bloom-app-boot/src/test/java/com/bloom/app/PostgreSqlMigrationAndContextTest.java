@@ -19,6 +19,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.math.BigDecimal;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -78,7 +79,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsLegacyStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
@@ -89,8 +90,10 @@ class PostgreSqlMigrationAndContextTest {
 
         assertThat(stockRows).hasSize(6);
         assertThat(stockRows).allSatisfy(row -> {
-            assertThat(row.get("stock_store")).isEqualTo(row.get("stock_quantity"));
-            assertThat(row.get("stock_warehouse")).isEqualTo(0);
+            assertThat((BigDecimal) row.get("stock_store")).isEqualByComparingTo((BigDecimal) row.get("stock_quantity"));
+            assertThat((BigDecimal) row.get("stock_store")).hasScaleOf(4);
+            assertThat((BigDecimal) row.get("stock_quantity")).hasScaleOf(4);
+            assertThat((BigDecimal) row.get("stock_warehouse")).isEqualByComparingTo("0.0000");
             assertThat(row.get("base_unit_of_measure")).isEqualTo("PIECE");
             assertThat(row.get("fractional_quantity_allowed")).isEqualTo(false);
         });
@@ -125,6 +128,25 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(numericScale("cash_sessions", "opening_cash")).isEqualTo(4);
         assertThat(numericScale("cash_sessions", "closing_cash")).isEqualTo(4);
         assertThat(numericScale("expenses", "amount")).isEqualTo(4);
+        assertThat(numericScale("items", "stock_quantity")).isEqualTo(4);
+        assertThat(numericScale("items", "stock_store")).isEqualTo(4);
+        assertThat(numericScale("items", "stock_warehouse")).isEqualTo(4);
+        assertThat(numericScale("sale_items", "quantity")).isEqualTo(4);
+        assertThat(numericScale("goods_receipt_items", "quantity")).isEqualTo(4);
+        assertThat(numericScale("stock_adjustment_items", "change_quantity")).isEqualTo(4);
+        assertThat(numericScale("stock_adjustment_items", "previous_stock")).isEqualTo(4);
+        assertThat(numericScale("stock_adjustment_items", "new_stock")).isEqualTo(4);
+        assertThat(numericScale("stock_movements", "quantity")).isEqualTo(4);
+        assertThat(numericScale("stock_movements", "qty_before")).isEqualTo(4);
+        assertThat(numericScale("stock_movements", "qty_after")).isEqualTo(4);
+        assertThat(numericScale("item_audit_logs", "qty")).isEqualTo(4);
+        assertThat(numericScale("item_audit_logs", "qty_before")).isEqualTo(4);
+        assertThat(numericScale("item_audit_logs", "qty_after")).isEqualTo(4);
+
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+            UPDATE items SET stock_store = -0.0001 WHERE id = 1
+            """))
+            .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

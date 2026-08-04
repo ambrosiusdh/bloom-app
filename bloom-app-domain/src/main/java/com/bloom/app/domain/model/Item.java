@@ -63,13 +63,13 @@ public class Item {
     @Builder.Default
     private boolean fractionalQuantityAllowed = false;
 
-    @Column(name = "stock_store", nullable = false)
+    @Column(name = "stock_store", nullable = false, precision = 19, scale = 4)
     @Builder.Default
-    private Integer stockStore = 0;
+    private BigDecimal stockStore = BigDecimal.ZERO;
 
-    @Column(name = "stock_warehouse", nullable = false)
+    @Column(name = "stock_warehouse", nullable = false, precision = 19, scale = 4)
     @Builder.Default
-    private Integer stockWarehouse = 0;
+    private BigDecimal stockWarehouse = BigDecimal.ZERO;
 
     private boolean active;
 
@@ -92,7 +92,9 @@ public class Item {
     @Version
     private Long version;
 
-    public Integer getTotalStock() {
-        return (this.stockStore == null ? 0 : this.stockStore) + (this.stockWarehouse == null ? 0 : this.stockWarehouse);
+    public BigDecimal getTotalStock() {
+        BigDecimal store = this.stockStore == null ? BigDecimal.ZERO : this.stockStore;
+        BigDecimal warehouse = this.stockWarehouse == null ? BigDecimal.ZERO : this.stockWarehouse;
+        return store.add(warehouse);
     }
 }

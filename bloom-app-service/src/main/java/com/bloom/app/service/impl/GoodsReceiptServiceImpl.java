@@ -21,6 +21,7 @@ import com.bloom.app.service.GoodsReceiptService;
 import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.mapper.GoodsReceiptMapper;
 import com.bloom.app.service.specification.GoodsReceiptSpecification;
+import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -66,6 +67,8 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                     "Item not found: " + itemRequest.getItemSku()
                 ));
+            InventoryQuantityValidator.validateIncoming(
+                itemRequest.getQuantity(), item.isFractionalQuantityAllowed());
 
             GoodsReceiptItem goodsReceiptItem = GoodsReceiptItem.builder()
                 .goodsReceipt(goodsReceipt)

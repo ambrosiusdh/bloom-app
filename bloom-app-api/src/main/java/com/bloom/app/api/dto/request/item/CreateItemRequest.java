@@ -2,6 +2,7 @@ package com.bloom.app.api.dto.request.item;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -34,10 +35,12 @@ public class CreateItemRequest {
     private Boolean fractionalQuantityAllowed = false;
 
     @NotNull
+    @PositiveOrZero
     @Builder.Default
-    private Integer stockStore = 0;
+    private BigDecimal stockStore = BigDecimal.ZERO;
 
     @NotNull
+    @PositiveOrZero
     @Builder.Default
-    private Integer stockWarehouse = 0;
+    private BigDecimal stockWarehouse = BigDecimal.ZERO;
 }

@@ -7,6 +7,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -15,7 +17,7 @@ public class StockAdjustmentItemResponse {
     private Long id;
     private ItemResponse item;
     private StockAdjustmentActionType actionType;
-    private Integer changeQuantity;
-    private Integer previousStock;
-    private Integer newStock;
+    private BigDecimal changeQuantity;
+    private BigDecimal previousStock;
+    private BigDecimal newStock;
 }

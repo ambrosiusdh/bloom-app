@@ -13,6 +13,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.Instant;
+import java.math.BigDecimal;
 
 import com.bloom.app.domain.enums.StockLocation;
 
@@ -48,8 +49,8 @@ public class StockMovement {
     @Column(name = "source_id", nullable = false)
     private Long sourceId;
 
-    @Column(name = "quantity", nullable = false)
-    private Integer quantity;
+    @Column(name = "quantity", nullable = false, precision = 19, scale = 4)
+    private BigDecimal quantity;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     @CreatedDate
@@ -63,9 +64,9 @@ public class StockMovement {
     @Column(name = "stock_location", nullable = false)
     private StockLocation stockLocation;
 
-    @Column(name = "qty_before", nullable = false)
-    private Integer qtyBefore;
+    @Column(name = "qty_before", nullable = false, precision = 19, scale = 4)
+    private BigDecimal qtyBefore;
 
-    @Column(name = "qty_after", nullable = false)
-    private Integer qtyAfter;
+    @Column(name = "qty_after", nullable = false, precision = 19, scale = 4)
+    private BigDecimal qtyAfter;
 }

@@ -42,8 +42,8 @@ public class GoodsReceiptItem {
     @JoinColumn(name = "item_id", nullable = false)
     private Item item;
 
-    @Column(name = "quantity", nullable = false)
-    private Integer quantity;
+    @Column(name = "quantity", nullable = false, precision = 19, scale = 4)
+    private BigDecimal quantity;
 
     @Column(name = "purchase_price", nullable = false, precision = 19, scale = 4)
     private BigDecimal purchasePrice;

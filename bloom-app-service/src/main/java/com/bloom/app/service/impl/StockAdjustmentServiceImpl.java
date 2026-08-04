@@ -15,8 +15,10 @@ import com.bloom.app.domain.model.StockAdjustmentItem;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.StockAdjustmentRepository;
 import com.bloom.app.service.StockAdjustmentService;
+import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.mapper.StockAdjustmentMapper;
 import com.bloom.app.service.specification.StockAdjustmentSpecification;
+import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +26,7 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.ss.usermodel.DataFormatter;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -38,6 +41,8 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.math.BigDecimal;
+import java.util.Locale;
 
 @Slf4j
 @Service
@@ -46,7 +51,7 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
     private final StockAdjustmentRepository stockAdjustmentRepository;
     private final ItemRepository itemRepository;
     private final StockAdjustmentMapper stockAdjustmentMapper;
-    private final StockMovementServiceImpl stockMovementService;
+    private final StockMovementService stockMovementService;
     private final DocumentCounterServiceImpl documentCounterService;
 
     @Override
@@ -61,20 +66,24 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
             Item item = itemRepository.findItemBySku(itemRequest.getItemSku())
                     .orElseThrow(() -> new ResourceNotFoundException("Item not found: " + itemRequest.getItemSku()));
 
-            int previousStock = (itemRequest.getStockLocation() == StockLocation.STORE)
-                    ? (item.getStockStore() != null ? item.getStockStore() : 0)
-                    : (item.getStockWarehouse() != null ? item.getStockWarehouse() : 0);
-            int changeQuantity = itemRequest.getChangeQuantity();
-            int newStock = switch (itemRequest.getActionType()) {
-                case ADD -> previousStock + changeQuantity;
-                case REMOVE -> previousStock - changeQuantity;
+            BigDecimal previousStock = (itemRequest.getStockLocation() == StockLocation.STORE)
+                    ? (item.getStockStore() != null ? item.getStockStore() : BigDecimal.ZERO)
+                    : (item.getStockWarehouse() != null ? item.getStockWarehouse() : BigDecimal.ZERO);
+            BigDecimal requestedQuantity = itemRequest.getChangeQuantity();
+            InventoryQuantityValidator.validateIncoming(
+                requestedQuantity, item.isFractionalQuantityAllowed());
+            BigDecimal changeQuantity = requestedQuantity;
+            BigDecimal newStock = switch (itemRequest.getActionType()) {
+                case ADD -> previousStock.add(changeQuantity);
+                case REMOVE -> previousStock.subtract(changeQuantity);
                 case CORRECTION -> {
-                    int absoluteValue = changeQuantity;
+                    BigDecimal absoluteValue = changeQuantity;
                     // Recalculate delta for stock movement history later in the code
-                    changeQuantity = absoluteValue - previousStock;
+                    changeQuantity = absoluteValue.subtract(previousStock);
                     yield absoluteValue; // 'yield' returns the value from a multi-line block
                 }
             };
+            InventoryQuantityValidator.validateStock(newStock, item.isFractionalQuantityAllowed());
 
             StockAdjustmentItem stockAdjustmentItem = StockAdjustmentItem.builder()
                     .stockAdjustment(stockAdjustment)
@@ -132,12 +141,15 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
             if (filename != null && (filename.endsWith(".xls") || filename.endsWith(".xlsx"))) {
                 try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
                     Sheet sheet = workbook.getSheetAt(0);
+                    DataFormatter dataFormatter = new DataFormatter(Locale.ROOT);
                     for (Row row : sheet) {
                         if (row.getRowNum() == 0)
                             continue; // Skip header
                         // Expected columns: ItemSku, ChangeQuantity, ActionType, Reason
                         String itemSku = row.getCell(0).getStringCellValue();
-                        Integer changeQuantity = (int) row.getCell(1).getNumericCellValue();
+                        BigDecimal changeQuantity = new BigDecimal(
+                            dataFormatter.formatCellValue(row.getCell(1)).trim());
+                        InventoryQuantityValidator.validateIncoming(changeQuantity);
                         String actionTypeStr = row.getCell(2).getStringCellValue();
                         String reason = row.getCell(3).getStringCellValue();
 
@@ -161,7 +173,8 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                         String[] data = line.split(",");
                         // Expected columns: ItemSku, ChangeQuantity, ActionType, Reason
                         String itemSku = data[0];
-                        Integer changeQuantity = Integer.parseInt(data[1]);
+                        BigDecimal changeQuantity = new BigDecimal(data[1].trim());
+                        InventoryQuantityValidator.validateIncoming(changeQuantity);
                         String actionTypeStr = data[2];
                         String reason = data.length > 3 ? data[3] : null;
 

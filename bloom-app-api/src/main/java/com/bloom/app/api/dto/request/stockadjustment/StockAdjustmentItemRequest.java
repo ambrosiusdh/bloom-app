@@ -3,10 +3,13 @@ package com.bloom.app.api.dto.request.stockadjustment;
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.enums.StockLocation;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.math.BigDecimal;
 
 @Data
 @Builder
@@ -17,7 +20,8 @@ public class StockAdjustmentItemRequest {
     private String itemSku;
 
     @NotNull
-    private Integer changeQuantity;
+    @Positive
+    private BigDecimal changeQuantity;
 
     @NotNull
     private StockAdjustmentActionType actionType;

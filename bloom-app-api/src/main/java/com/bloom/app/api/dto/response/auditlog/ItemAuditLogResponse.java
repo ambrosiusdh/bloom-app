@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.math.BigDecimal;
 
 @Data
 @Builder
@@ -17,9 +18,9 @@ public class ItemAuditLogResponse {
     private Long id;
     private ItemResponse item;
     private MovementSourceType source;
-    private Integer qty;
-    private Integer qtyBefore;
-    private Integer qtyAfter;
+    private BigDecimal qty;
+    private BigDecimal qtyBefore;
+    private BigDecimal qtyAfter;
     private String referenceNo;
     private String createdBy;
     private Instant createdDate;

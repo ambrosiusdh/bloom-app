@@ -25,6 +25,8 @@ class ItemMapperTest {
             .price(java.math.BigDecimal.TEN)
             .baseUnitOfMeasure(UnitOfMeasure.METER)
             .fractionalQuantityAllowed(true)
+            .stockStore(new java.math.BigDecimal("1.2500"))
+            .stockWarehouse(new java.math.BigDecimal("0.5000"))
             .build();
 
         Item item = mapper.createRequestToEntity(request);
@@ -34,5 +36,8 @@ class ItemMapperTest {
         assertThat(item.isFractionalQuantityAllowed()).isTrue();
         assertThat(response.getBaseUnitOfMeasure()).isEqualTo(UnitOfMeasure.METER);
         assertThat(response.isFractionalQuantityAllowed()).isTrue();
+        assertThat(response.getStockStore()).isEqualByComparingTo("1.2500");
+        assertThat(response.getStockWarehouse()).isEqualByComparingTo("0.5000");
+        assertThat(response.getStockQuantity()).isEqualByComparingTo("1.7500");
     }
 }

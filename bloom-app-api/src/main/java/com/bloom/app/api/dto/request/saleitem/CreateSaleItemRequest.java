@@ -6,12 +6,20 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import java.math.BigDecimal;
+
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
 @Builder
 public class CreateSaleItemRequest {
+    @NotNull
     private String itemSku;
-    private Integer quantity;
+    @NotNull
+    @Positive
+    private BigDecimal quantity;
+    @NotNull
     private StockLocation stockLocation;
 }

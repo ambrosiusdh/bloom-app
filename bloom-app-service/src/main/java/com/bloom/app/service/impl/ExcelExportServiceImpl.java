@@ -101,7 +101,7 @@ public class ExcelExportServiceImpl implements ExcelExportService {
                     createCell(row, 0, itemNum++, dataStyle);
                     createCell(row, 1, item.getItem() != null ? item.getItem().getSku() : "", dataStyle);
                     createCell(row, 2, item.getItem() != null ? item.getItem().getName() : "", dataStyle);
-                    createCell(row, 3, item.getQuantity(), dataStyle);
+                    createQuantityCell(row, 3, item.getQuantity(), dataStyle);
                     createCell(row, 4, item.getUnitPrice(), currencyStyle);
                     createCell(row, 5, item.getSubtotal(), currencyStyle);
                 }
@@ -168,6 +168,12 @@ public class ExcelExportServiceImpl implements ExcelExportService {
         } else if (value instanceof Integer) {
             cell.setCellValue((Integer) value);
         }
+        cell.setCellStyle(style);
+    }
+
+    private void createQuantityCell(Row row, int column, BigDecimal value, CellStyle style) {
+        Cell cell = row.createCell(column);
+        cell.setCellValue(value == null ? "" : value.toPlainString());
         cell.setCellStyle(style);
     }
 
