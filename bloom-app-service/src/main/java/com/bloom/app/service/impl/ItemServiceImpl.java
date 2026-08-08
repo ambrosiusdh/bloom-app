@@ -9,6 +9,7 @@ import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
+import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
 import com.bloom.app.persistence.repository.ItemCategoryCounterRepository;
@@ -27,6 +28,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.util.List;
 import java.util.Map;
@@ -58,15 +60,19 @@ public class ItemServiceImpl implements ItemService {
             sku = request.getSku();
         }
 
-        Item item = itemMapper.createRequestToEntity(request);
         boolean fractionalQuantityAllowed = Boolean.TRUE.equals(request.getFractionalQuantityAllowed());
-        InventoryQuantityValidator.validateStock(request.getStockStore(), fractionalQuantityAllowed);
-        InventoryQuantityValidator.validateStock(request.getStockWarehouse(), fractionalQuantityAllowed);
+        BigDecimal openingStore = openingBalanceOrZero(request.getStockStore());
+        BigDecimal openingWarehouse = openingBalanceOrZero(request.getStockWarehouse());
+        InventoryQuantityValidator.validateStock(openingStore, fractionalQuantityAllowed);
+        InventoryQuantityValidator.validateStock(openingWarehouse, fractionalQuantityAllowed);
+
+        Item item = itemMapper.createRequestToEntity(request);
+        assertZeroInitialBalances(item);
         item.setCategory(itemCategory);
         item.setSku(sku);
-        Item savedItem = itemRepository.save(item);
-        recordOpeningBalance(savedItem, request.getStockStore(), StockLocation.STORE);
-        recordOpeningBalance(savedItem, request.getStockWarehouse(), StockLocation.WAREHOUSE);
+        Item savedItem = itemRepository.saveAndFlush(item);
+        recordOpeningBalance(savedItem, openingStore, StockLocation.STORE);
+        recordOpeningBalance(savedItem, openingWarehouse, StockLocation.WAREHOUSE);
         return itemMapper.itemToItemResponse(savedItem);
     }
 
@@ -76,10 +82,15 @@ public class ItemServiceImpl implements ItemService {
         log.debug("ItemService updateItem using request: {}", request);
         Item item = itemRepository.findItemBySku(sku)
             .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
+        stockMovementService.validateBaseUnitOfMeasureChange(item, request.getBaseUnitOfMeasure());
         itemMapper.updateRequestToEntity(request, item);
         InventoryQuantityValidator.validateStock(item.getStockStore(), item.isFractionalQuantityAllowed());
         InventoryQuantityValidator.validateStock(item.getStockWarehouse(), item.isFractionalQuantityAllowed());
-        return itemMapper.itemToItemResponse(itemRepository.save(item));
+        try {
+            return itemMapper.itemToItemResponse(itemRepository.saveAndFlush(item));
+        } catch (OptimisticLockingFailureException exception) {
+            throw new StockConcurrencyException(item.getSku(), exception);
+        }
     }
 
     @Override
@@ -167,6 +178,18 @@ public class ItemServiceImpl implements ItemService {
                 item.getSku(),
                 stockLocation
             );
+        }
+    }
+
+    private BigDecimal openingBalanceOrZero(BigDecimal quantity) {
+        return quantity == null ? BigDecimal.ZERO : quantity;
+    }
+
+    private void assertZeroInitialBalances(Item item) {
+        BigDecimal store = item.getStockStore() == null ? BigDecimal.ZERO : item.getStockStore();
+        BigDecimal warehouse = item.getStockWarehouse() == null ? BigDecimal.ZERO : item.getStockWarehouse();
+        if (store.compareTo(BigDecimal.ZERO) != 0 || warehouse.compareTo(BigDecimal.ZERO) != 0) {
+            throw new IllegalStateException("New items must be persisted with zero stock balances");
         }
     }
 }

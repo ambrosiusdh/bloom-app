@@ -3,6 +3,7 @@ package com.bloom.app.api.exception;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import com.bloom.app.domain.exception.StockConcurrencyException;
 
 import java.util.Map;
 
@@ -29,5 +30,19 @@ class GlobalExceptionHandlerTest {
         assertThat(body.get("message")).isEqualTo(
             "The resource was modified by another transaction. Reload and retry."
         );
+    }
+
+    @Test
+    void returnsConflictForStockDomainConcurrencyException() {
+        StockConcurrencyException exception = new StockConcurrencyException(
+            "ITEM-1", new ObjectOptimisticLockingFailureException(Object.class, 42L));
+
+        var response = handler.handleInventoryConflict(exception);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        Map<?, ?> body = (Map<?, ?>) response.getBody();
+        assertThat(body.get("errorType")).isEqualTo("StockConcurrencyException");
+        assertThat(body.get("message")).isEqualTo(
+            "Stock for item ITEM-1 was modified concurrently. Reload and retry.");
     }
 }

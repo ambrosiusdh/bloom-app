@@ -1,7 +1,10 @@
 package com.bloom.app.api.exception;
 
 import com.bloom.app.domain.exception.BusinessException;
+import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
+import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
+import com.bloom.app.domain.exception.StockConcurrencyException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -83,6 +86,16 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
+    @ExceptionHandler(InsufficientStockException.class)
+    public ResponseEntity<?> handleInsufficientStock(InsufficientStockException ex) {
+        return domainError(ex, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler({StockConcurrencyException.class, BaseUnitOfMeasureImmutableException.class})
+    public ResponseEntity<?> handleInventoryConflict(RuntimeException ex) {
+        return domainError(ex, HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(OptimisticLockingFailureException.class)
     public ResponseEntity<?> handleOptimisticLockingFailure(OptimisticLockingFailureException ex) {
         Map<String, Object> body = new HashMap<>();
@@ -103,5 +116,14 @@ public class GlobalExceptionHandler {
         body.put("errorType", ex.getClass().getSimpleName());
 
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
+    }
+
+    private ResponseEntity<?> domainError(RuntimeException exception, HttpStatus status) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", false);
+        body.put("message", exception.getMessage());
+        body.put("code", status.value());
+        body.put("errorType", exception.getClass().getSimpleName());
+        return ResponseEntity.status(status).body(body);
     }
 }

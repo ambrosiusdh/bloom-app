@@ -6,12 +6,15 @@ import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.StockMovement;
 import com.bloom.app.domain.model.UnitOfMeasure;
+import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
+import com.bloom.app.domain.exception.InsufficientStockException;
+import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.persistence.repository.ItemAuditLogRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 import java.math.BigDecimal;
 
@@ -20,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 class StockMovementServiceImplTest {
     private final StockMovementRepository stockMovementRepository = mock(StockMovementRepository.class);
@@ -31,6 +35,7 @@ class StockMovementServiceImplTest {
     @Test
     void recordsFractionalMovementWithoutRounding() {
         Item item = item(true, "1.2500");
+        when(itemRepository.saveAndFlush(item)).thenReturn(item);
 
         service.recordMovement(
             MovementSourceType.SALE, 1L, item, new BigDecimal("0.2500"),
@@ -38,10 +43,12 @@ class StockMovementServiceImplTest {
 
         assertThat(item.getStockStore()).isEqualByComparingTo("1.0000");
         ArgumentCaptor<StockMovement> movementCaptor = ArgumentCaptor.forClass(StockMovement.class);
-        verify(stockMovementRepository).save(movementCaptor.capture());
+        verify(stockMovementRepository).saveAndFlush(movementCaptor.capture());
         assertThat(movementCaptor.getValue().getQuantity()).isEqualByComparingTo("0.2500");
         assertThat(movementCaptor.getValue().getQtyBefore()).isEqualByComparingTo("1.2500");
         assertThat(movementCaptor.getValue().getQtyAfter()).isEqualByComparingTo("1.0000");
+        assertThat(movementCaptor.getValue().getQtyAfter()).isEqualByComparingTo(
+            movementCaptor.getValue().getQtyBefore().subtract(movementCaptor.getValue().getQuantity()));
     }
 
     @Test
@@ -64,14 +71,50 @@ class StockMovementServiceImplTest {
         assertThatThrownBy(() -> service.recordMovement(
             MovementSourceType.SALE, 1L, item, new BigDecimal("0.2501"),
             MovementType.OUT, "SALE-1", StockLocation.STORE))
-            .isInstanceOf(ResponseStatusException.class)
+            .isInstanceOf(InsufficientStockException.class)
             .hasMessageContaining("Insufficient stock");
 
         verifyNoInteractions(itemRepository, stockMovementRepository, itemAuditLogRepository);
     }
 
+    @Test
+    void translatesOptimisticLockFailureToStockDomainConflict() {
+        Item item = item(true, "1.0000");
+        when(itemRepository.saveAndFlush(item)).thenThrow(
+            new ObjectOptimisticLockingFailureException(Item.class, item.getId()));
+
+        assertThatThrownBy(() -> service.recordMovement(
+            MovementSourceType.SALE, 1L, item, new BigDecimal("0.2500"),
+            MovementType.OUT, "SALE-1", StockLocation.STORE))
+            .isInstanceOf(StockConcurrencyException.class)
+            .hasMessageContaining("modified concurrently");
+
+        verifyNoInteractions(stockMovementRepository, itemAuditLogRepository);
+    }
+
+    @Test
+    void preventsBaseUomChangeAfterFirstMovement() {
+        Item item = item(true, "1.0000");
+        when(stockMovementRepository.existsByProductId(item.getId())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.validateBaseUnitOfMeasureChange(item, UnitOfMeasure.LITER))
+            .isInstanceOf(BaseUnitOfMeasureImmutableException.class)
+            .hasMessageContaining("cannot change");
+    }
+
+    @Test
+    void allowsBaseUomChangeBeforeFirstMovement() {
+        Item item = item(true, "0.0000");
+        when(stockMovementRepository.existsByProductId(item.getId())).thenReturn(false);
+
+        service.validateBaseUnitOfMeasureChange(item, UnitOfMeasure.LITER);
+
+        verify(stockMovementRepository).existsByProductId(item.getId());
+    }
+
     private Item item(boolean fractionalQuantityAllowed, String storeStock) {
         return Item.builder()
+            .id(42L)
             .sku("ITEM-1")
             .baseUnitOfMeasure(UnitOfMeasure.METER)
             .fractionalQuantityAllowed(fractionalQuantityAllowed)

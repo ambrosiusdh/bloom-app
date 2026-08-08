@@ -34,12 +34,10 @@ public class CreateItemRequest {
     @Builder.Default
     private Boolean fractionalQuantityAllowed = false;
 
-    @NotNull
     @PositiveOrZero
     @Builder.Default
     private BigDecimal stockStore = BigDecimal.ZERO;
 
-    @NotNull
     @PositiveOrZero
     @Builder.Default
     private BigDecimal stockWarehouse = BigDecimal.ZERO;

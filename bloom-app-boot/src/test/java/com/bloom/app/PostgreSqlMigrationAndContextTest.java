@@ -1,9 +1,17 @@
 package com.bloom.app;
 
 import com.bloom.app.domain.enums.DocumentType;
+import com.bloom.app.domain.enums.MovementSourceType;
+import com.bloom.app.domain.enums.MovementType;
+import com.bloom.app.domain.enums.StockLocation;
+import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.model.DocumentCounter;
+import com.bloom.app.domain.model.Item;
 import com.bloom.app.persistence.repository.DocumentCounterRepository;
+import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.ItemCategoryCounterRepository;
+import com.bloom.app.persistence.repository.StockMovementRepository;
+import com.bloom.app.service.StockMovementService;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -23,6 +31,8 @@ import java.math.BigDecimal;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
@@ -50,6 +60,15 @@ class PostgreSqlMigrationAndContextTest {
 
     @Autowired
     private ItemCategoryCounterRepository itemCategoryCounterRepository;
+
+    @Autowired
+    private ItemRepository itemRepository;
+
+    @Autowired
+    private StockMovementRepository stockMovementRepository;
+
+    @Autowired
+    private StockMovementService stockMovementService;
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -79,12 +98,13 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsLegacyStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
                    base_unit_of_measure, fractional_quantity_allowed
             FROM items
+            WHERE id BETWEEN 1 AND 6
             ORDER BY id
             """);
 
@@ -114,6 +134,10 @@ class PostgreSqlMigrationAndContextTest {
             "item_category_counters",
             "uq_item_category_counters_category_sequence"
         )).isFalse();
+        assertThat(constraintExists(
+            "stock_movements",
+            "chk_stock_movements_balance_equation"
+        )).isTrue();
 
         assertThat(numericScale("items", "price")).isEqualTo(4);
         assertThat(numericScale("sales", "subtotal_amount")).isEqualTo(4);
@@ -145,6 +169,15 @@ class PostgreSqlMigrationAndContextTest {
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
             UPDATE items SET stock_store = -0.0001 WHERE id = 1
+            """))
+            .isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+            INSERT INTO stock_movements (
+                product_id, movement_type, source_type, source_id, quantity,
+                created_at, stock_location, qty_before, qty_after
+            ) VALUES (1, 'IN', 'OPENING_BALANCE', 1, 1.0000,
+                      CURRENT_TIMESTAMP, 'STORE', 0.0000, 2.0000)
             """))
             .isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -230,6 +263,79 @@ class PostgreSqlMigrationAndContextTest {
             .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    @Test
+    void rollsBackBalanceAndMovementWhenLegacyAuditWriteFails() {
+        Long itemId = insertInventoryItem("ROLLBACK", new BigDecimal("0.0000"));
+        Item item = itemRepository.findById(itemId).orElseThrow();
+
+        assertThatThrownBy(() -> stockMovementService.recordMovement(
+            MovementSourceType.OPENING_BALANCE,
+            itemId,
+            item,
+            new BigDecimal("1.0000"),
+            MovementType.IN,
+            "X".repeat(101),
+            StockLocation.STORE
+        )).isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThat(itemRepository.findById(itemId).orElseThrow().getStockStore())
+            .isEqualByComparingTo("0.0000");
+        assertThat(stockMovementRepository.findByProductId(itemId)).isEmpty();
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM item_audit_logs WHERE item_id = ?", Long.class, itemId))
+            .isZero();
+    }
+
+    @Test
+    void oneOfTwoStaleConcurrentStockWritesFailsWithDomainConflict() throws Exception {
+        Long itemId = insertInventoryItem("CONCURRENCY", new BigDecimal("1.0000"));
+        Item firstView = itemRepository.findById(itemId).orElseThrow();
+        Item secondView = itemRepository.findById(itemId).orElseThrow();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        List<RuntimeException> outcomes;
+        try {
+            List<CompletableFuture<RuntimeException>> attempts = List.of(firstView, secondView).stream()
+                .map(item -> CompletableFuture.supplyAsync(() -> {
+                    ready.countDown();
+                    try {
+                        start.await(10, TimeUnit.SECONDS);
+                        stockMovementService.recordMovement(
+                            MovementSourceType.SALE,
+                            itemId,
+                            item,
+                            new BigDecimal("0.7500"),
+                            MovementType.OUT,
+                            "CONCURRENT-SALE",
+                            StockLocation.STORE
+                        );
+                        return null;
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        return new IllegalStateException(exception);
+                    } catch (RuntimeException exception) {
+                        return exception;
+                    }
+                }, executor))
+                .toList();
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            outcomes = attempts.stream().map(CompletableFuture::join).toList();
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+
+        assertThat(outcomes).filteredOn(java.util.Objects::isNull).hasSize(1);
+        assertThat(outcomes).filteredOn(StockConcurrencyException.class::isInstance).hasSize(1);
+        assertThat(itemRepository.findById(itemId).orElseThrow().getStockStore())
+            .isEqualByComparingTo("0.2500");
+        assertThat(stockMovementRepository.findByProductId(itemId)).hasSize(1);
+    }
+
     private boolean tableExists(String tableName) {
         Boolean exists = jdbcTemplate.queryForObject(
             """
@@ -311,6 +417,24 @@ class PostgreSqlMigrationAndContextTest {
             constraintName
         );
         return Boolean.TRUE.equals(exists);
+    }
+
+    private Long insertInventoryItem(String purpose, BigDecimal storeStock) {
+        return jdbcTemplate.queryForObject(
+            """
+            INSERT INTO items (
+                name, sku, price, stock_quantity, stock_store, stock_warehouse,
+                base_unit_of_measure, fractional_quantity_allowed, active,
+                item_category_id, version
+            ) VALUES (?, ?, 10.0000, ?, ?, 0.0000, 'PIECE', TRUE, TRUE, 1, 0)
+            RETURNING id
+            """,
+            Long.class,
+            purpose + " test item",
+            purpose + "-" + UUID.randomUUID(),
+            storeStock,
+            storeStock
+        );
     }
 
     private static PostgreSQLContainer<?> startPostgresWhenRequired() {

@@ -32,9 +32,13 @@ class ItemMapperTest {
         Item item = mapper.createRequestToEntity(request);
         assertThat(item.getStockStore()).isEqualByComparingTo("0");
         assertThat(item.getStockWarehouse()).isEqualByComparingTo("0");
-        item.setStockStore(new java.math.BigDecimal("1.2500"));
-        item.setStockWarehouse(new java.math.BigDecimal("0.5000"));
-        ItemResponse response = mapper.itemToItemResponse(item);
+        Item stockedItem = Item.builder()
+            .baseUnitOfMeasure(item.getBaseUnitOfMeasure())
+            .fractionalQuantityAllowed(item.isFractionalQuantityAllowed())
+            .stockStore(new java.math.BigDecimal("1.2500"))
+            .stockWarehouse(new java.math.BigDecimal("0.5000"))
+            .build();
+        ItemResponse response = mapper.itemToItemResponse(stockedItem);
 
         assertThat(item.getBaseUnitOfMeasure()).isEqualTo(UnitOfMeasure.METER);
         assertThat(item.isFractionalQuantityAllowed()).isTrue();
