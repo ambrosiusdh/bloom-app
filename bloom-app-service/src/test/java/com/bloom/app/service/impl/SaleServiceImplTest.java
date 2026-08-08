@@ -20,7 +20,6 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -60,7 +59,7 @@ class SaleServiceImplTest {
         SaleResponse expectedResponse = SaleResponse.builder().build();
 
         when(saleMapper.createRequestToEntity(request)).thenReturn(sale);
-        when(itemRepository.findItemBySku("ITEM-1")).thenReturn(Optional.of(item));
+        when(itemRepository.findBySkuIn(List.of("ITEM-1"))).thenReturn(List.of(item));
         when(documentCounterService.generateNextCode(DocumentType.SALE)).thenReturn("SALE-1");
         when(saleRepository.save(sale)).thenAnswer(invocation -> {
             sale.setId(1L);
@@ -80,7 +79,7 @@ class SaleServiceImplTest {
         assertThat(sale.getSubtotalAmount()).isEqualByComparingTo("18.5184");
         assertThat(sale.getDiscountAmount()).isEqualByComparingTo("0.5000");
         assertThat(sale.getTotalAmount()).isEqualByComparingTo("18.0184");
-        verify(itemRepository).findItemBySku("ITEM-1");
+        verify(itemRepository).findBySkuIn(List.of("ITEM-1"));
         verify(stockMovementService).recordSaleMovements(sale);
     }
 
@@ -93,7 +92,7 @@ class SaleServiceImplTest {
         Sale sale = Sale.builder().build();
 
         when(saleMapper.createRequestToEntity(request)).thenReturn(sale);
-        when(itemRepository.findItemBySku("ITEM-1")).thenReturn(Optional.of(item));
+        when(itemRepository.findBySkuIn(List.of("ITEM-1"))).thenReturn(List.of(item));
 
         assertThatThrownBy(() -> service.createSale(request))
             .isInstanceOfSatisfying(BusinessException.class, exception ->
@@ -113,7 +112,7 @@ class SaleServiceImplTest {
         Sale sale = Sale.builder().build();
 
         when(saleMapper.createRequestToEntity(request)).thenReturn(sale);
-        when(itemRepository.findItemBySku("ITEM-1")).thenReturn(Optional.of(item));
+        when(itemRepository.findBySkuIn(List.of("ITEM-1"))).thenReturn(List.of(item));
 
         assertThatThrownBy(() -> service.createSale(request))
             .isInstanceOfSatisfying(BusinessException.class, exception ->
@@ -136,8 +135,8 @@ class SaleServiceImplTest {
             line("WHOLE", "0.2500", StockLocation.STORE));
 
         when(saleMapper.createRequestToEntity(fractionalRequest)).thenReturn(fractionalSale);
-        when(itemRepository.findItemBySku("FRACTIONAL")).thenReturn(Optional.of(fractionalItem));
-        when(itemRepository.findItemBySku("WHOLE")).thenReturn(Optional.of(wholeItem));
+        when(itemRepository.findBySkuIn(List.of("FRACTIONAL"))).thenReturn(List.of(fractionalItem));
+        when(itemRepository.findBySkuIn(List.of("WHOLE"))).thenReturn(List.of(wholeItem));
         when(documentCounterService.generateNextCode(DocumentType.SALE)).thenReturn("SALE-1");
         when(saleRepository.save(fractionalSale)).thenAnswer(invocation -> {
             fractionalSale.setId(1L);
@@ -151,6 +150,31 @@ class SaleServiceImplTest {
         assertThatThrownBy(() -> service.createSale(wholeRequest))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("Fractional quantity is not allowed for this item");
+    }
+
+    @Test
+    void loadsDistinctSaleItemsInOneRepositoryQuery() {
+        Item firstItem = item("ITEM-1", "2.0000", "1.0000", "0.0000", true);
+        Item secondItem = item("ITEM-2", "3.0000", "1.0000", "0.0000", true);
+        CreateSaleRequest request = saleRequest(
+            new BigDecimal("5.0000"), BigDecimal.ZERO,
+            line("ITEM-1", "1.0000", StockLocation.STORE),
+            line("ITEM-2", "1.0000", StockLocation.STORE));
+        Sale sale = Sale.builder().build();
+
+        when(saleMapper.createRequestToEntity(request)).thenReturn(sale);
+        when(itemRepository.findBySkuIn(List.of("ITEM-1", "ITEM-2")))
+            .thenReturn(List.of(firstItem, secondItem));
+        when(documentCounterService.generateNextCode(DocumentType.SALE)).thenReturn("SALE-1");
+        when(saleRepository.save(sale)).thenAnswer(invocation -> {
+            sale.setId(1L);
+            return sale;
+        });
+
+        service.createSale(request);
+
+        assertThat(sale.getItems()).hasSize(2);
+        verify(itemRepository).findBySkuIn(List.of("ITEM-1", "ITEM-2"));
     }
 
     private CreateSaleRequest saleRequest(

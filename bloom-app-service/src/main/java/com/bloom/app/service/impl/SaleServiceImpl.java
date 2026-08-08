@@ -34,10 +34,12 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -120,24 +122,27 @@ public class SaleServiceImpl implements SaleService {
 
     private Map<SaleLineKey, AggregatedSaleLine> aggregateSaleLines(
             List<CreateSaleItemRequest> itemRequests) {
-        Map<String, Item> itemsBySku = new LinkedHashMap<>();
+        Set<String> requestedSkus = new LinkedHashSet<>();
         Map<SaleLineKey, AggregatedSaleLine> aggregatedLines = new LinkedHashMap<>();
 
         for (CreateSaleItemRequest itemRequest : itemRequests) {
-            if (itemRequest == null) {
-                throw new IllegalArgumentException("Sale item is required");
-            }
-            String sku = itemRequest.getItemSku();
-            if (sku == null || sku.isBlank()) {
-                throw new IllegalArgumentException("Item SKU is required");
-            }
-            StockLocation stockLocation = itemRequest.getStockLocation();
-            if (stockLocation == null) {
-                throw new IllegalArgumentException("Stock location is required");
-            }
+            validateSaleLineIdentity(itemRequest);
+            requestedSkus.add(itemRequest.getItemSku());
+        }
 
-            Item item = itemsBySku.computeIfAbsent(sku, key -> itemRepository.findItemBySku(key)
-                .orElseThrow(() -> new ResourceNotFoundException("Item not found: " + key)));
+        Map<String, Item> itemsBySku = new LinkedHashMap<>();
+        itemRepository.findBySkuIn(new ArrayList<>(requestedSkus))
+            .forEach(item -> itemsBySku.put(item.getSku(), item));
+        for (String sku : requestedSkus) {
+            if (!itemsBySku.containsKey(sku)) {
+                throw new ResourceNotFoundException("Item not found: " + sku);
+            }
+        }
+
+        for (CreateSaleItemRequest itemRequest : itemRequests) {
+            String sku = itemRequest.getItemSku();
+            StockLocation stockLocation = itemRequest.getStockLocation();
+            Item item = itemsBySku.get(sku);
             InventoryQuantityValidator.validateIncoming(
                 itemRequest.getQuantity(), item.isFractionalQuantityAllowed());
 
@@ -152,6 +157,18 @@ public class SaleServiceImpl implements SaleService {
             );
         }
         return aggregatedLines;
+    }
+
+    private void validateSaleLineIdentity(CreateSaleItemRequest itemRequest) {
+        if (itemRequest == null) {
+            throw new IllegalArgumentException("Sale item is required");
+        }
+        if (itemRequest.getItemSku() == null || itemRequest.getItemSku().isBlank()) {
+            throw new IllegalArgumentException("Item SKU is required");
+        }
+        if (itemRequest.getStockLocation() == null) {
+            throw new IllegalArgumentException("Stock location is required");
+        }
     }
 
     private BigDecimal stockAt(Item item, StockLocation stockLocation) {
