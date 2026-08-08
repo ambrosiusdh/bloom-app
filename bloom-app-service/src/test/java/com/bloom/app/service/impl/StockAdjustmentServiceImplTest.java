@@ -28,6 +28,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -46,7 +47,7 @@ class StockAdjustmentServiceImplTest {
     );
 
     @Test
-    void acceptsZeroAsCorrectionTargetAndStoresSignedDelta() {
+    void acceptsZeroAsCorrectionTargetAndPreservesTargetAndBalanceSnapshots() {
         StockAdjustmentItemRequest itemRequest = StockAdjustmentItemRequest.builder()
             .itemSku("ITEM-1")
             .changeQuantity(new BigDecimal("0.0000"))
@@ -79,8 +80,71 @@ class StockAdjustmentServiceImplTest {
         assertThat(adjustment.getItems()).hasSize(1);
         assertThat(adjustment.getItems().getFirst().getPreviousStock()).isEqualByComparingTo("5.0000");
         assertThat(adjustment.getItems().getFirst().getNewStock()).isEqualByComparingTo("0.0000");
-        assertThat(adjustment.getItems().getFirst().getChangeQuantity()).isEqualByComparingTo("-5.0000");
+        assertThat(adjustment.getItems().getFirst().getChangeQuantity()).isEqualByComparingTo("0.0000");
         verify(stockMovementService).recordManualAdjustment(adjustment);
+    }
+
+    @Test
+    void definesAddAndRemoveAsPositiveDeltas() {
+        StockAdjustmentItemRequest addRequest = StockAdjustmentItemRequest.builder()
+            .itemSku("ADD-ITEM")
+            .changeQuantity(new BigDecimal("1.2500"))
+            .actionType(StockAdjustmentActionType.ADD)
+            .stockLocation(StockLocation.STORE)
+            .build();
+        StockAdjustmentItemRequest removeRequest = StockAdjustmentItemRequest.builder()
+            .itemSku("REMOVE-ITEM")
+            .changeQuantity(new BigDecimal("0.7500"))
+            .actionType(StockAdjustmentActionType.REMOVE)
+            .stockLocation(StockLocation.WAREHOUSE)
+            .build();
+        CreateStockAdjustmentRequest request = CreateStockAdjustmentRequest.builder()
+            .items(List.of(addRequest, removeRequest))
+            .build();
+        Item addItem = item("ADD-ITEM", "2.0000", "0.0000");
+        Item removeItem = item("REMOVE-ITEM", "0.0000", "2.0000");
+        StockAdjustment adjustment = StockAdjustment.builder().build();
+
+        when(stockAdjustmentMapper.createRequestToEntity(request)).thenReturn(adjustment);
+        when(itemRepository.findItemBySku("ADD-ITEM")).thenReturn(java.util.Optional.of(addItem));
+        when(itemRepository.findItemBySku("REMOVE-ITEM")).thenReturn(java.util.Optional.of(removeItem));
+        when(documentCounterService.generateNextCode(DocumentType.STOCK_ADJUSTMENT)).thenReturn("SA-1");
+        when(stockAdjustmentRepository.save(adjustment)).thenReturn(adjustment);
+
+        service.createStockAdjustment(request);
+
+        assertThat(adjustment.getItems().getFirst().getPreviousStock()).isEqualByComparingTo("2.0000");
+        assertThat(adjustment.getItems().get(0).getNewStock()).isEqualByComparingTo("3.2500");
+        assertThat(adjustment.getItems().get(0).getChangeQuantity()).isEqualByComparingTo("1.2500");
+        assertThat(adjustment.getItems().get(1).getPreviousStock()).isEqualByComparingTo("2.0000");
+        assertThat(adjustment.getItems().get(1).getNewStock()).isEqualByComparingTo("1.2500");
+        assertThat(adjustment.getItems().get(1).getChangeQuantity()).isEqualByComparingTo("0.7500");
+        verify(stockMovementService).recordManualAdjustment(adjustment);
+    }
+
+    @Test
+    void rejectsNegativeCorrectionTargetBeforePersistence() {
+        StockAdjustmentItemRequest itemRequest = StockAdjustmentItemRequest.builder()
+            .itemSku("ITEM-1")
+            .changeQuantity(new BigDecimal("-0.0001"))
+            .actionType(StockAdjustmentActionType.CORRECTION)
+            .stockLocation(StockLocation.STORE)
+            .build();
+        CreateStockAdjustmentRequest request = CreateStockAdjustmentRequest.builder()
+            .items(List.of(itemRequest))
+            .build();
+        StockAdjustment adjustment = StockAdjustment.builder().build();
+
+        when(stockAdjustmentMapper.createRequestToEntity(request)).thenReturn(adjustment);
+        when(itemRepository.findItemBySku("ITEM-1"))
+            .thenReturn(java.util.Optional.of(item("ITEM-1", "1.0000", "0.0000")));
+
+        assertThatThrownBy(() -> service.createStockAdjustment(request))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Stock may not be negative");
+
+        verify(stockAdjustmentRepository, never()).save(adjustment);
+        verify(stockMovementService, never()).recordManualAdjustment(adjustment);
     }
 
     @Test
@@ -158,5 +222,16 @@ class StockAdjustmentServiceImplTest {
     private MockMultipartFile csvFile(String content) {
         return new MockMultipartFile(
             "file", "adjustments.csv", "text/csv", content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private Item item(String sku, String storeStock, String warehouseStock) {
+        return Item.builder()
+            .id((long) sku.hashCode())
+            .sku(sku)
+            .baseUnitOfMeasure(UnitOfMeasure.METER)
+            .fractionalQuantityAllowed(true)
+            .stockStore(new BigDecimal(storeStock))
+            .stockWarehouse(new BigDecimal(warehouseStock))
+            .build();
     }
 }

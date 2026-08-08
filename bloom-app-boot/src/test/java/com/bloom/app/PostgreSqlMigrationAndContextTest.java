@@ -1,16 +1,30 @@
 package com.bloom.app;
 
+import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
+import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
+import com.bloom.app.api.dto.request.stockadjustment.CreateStockAdjustmentRequest;
+import com.bloom.app.api.dto.request.stockadjustment.StockAdjustmentItemRequest;
+import com.bloom.app.api.dto.response.sale.SaleResponse;
+import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
 import com.bloom.app.domain.enums.DocumentType;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
+import com.bloom.app.domain.enums.PaymentType;
+import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.model.DocumentCounter;
 import com.bloom.app.domain.model.Item;
+import com.bloom.app.domain.model.Sale;
+import com.bloom.app.domain.model.SaleItem;
 import com.bloom.app.persistence.repository.DocumentCounterRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.ItemCategoryCounterRepository;
+import com.bloom.app.persistence.repository.SaleRepository;
+import com.bloom.app.persistence.repository.StockAdjustmentRepository;
 import com.bloom.app.persistence.repository.StockMovementRepository;
+import com.bloom.app.service.SaleService;
+import com.bloom.app.service.StockAdjustmentService;
 import com.bloom.app.service.StockMovementService;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
@@ -22,6 +36,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.util.List;
@@ -70,6 +85,18 @@ class PostgreSqlMigrationAndContextTest {
     @Autowired
     private StockMovementService stockMovementService;
 
+    @Autowired
+    private SaleService saleService;
+
+    @Autowired
+    private StockAdjustmentService stockAdjustmentService;
+
+    @Autowired
+    private SaleRepository saleRepository;
+
+    @Autowired
+    private StockAdjustmentRepository stockAdjustmentRepository;
+
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
         if (POSTGRES != null) {
@@ -98,7 +125,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsLegacyStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("8");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
@@ -138,6 +165,7 @@ class PostgreSqlMigrationAndContextTest {
             "stock_movements",
             "chk_stock_movements_balance_equation"
         )).isTrue();
+        assertThat(indexExists("uq_stock_movements_sale_item_location")).isTrue();
 
         assertThat(numericScale("items", "price")).isEqualTo(4);
         assertThat(numericScale("sales", "subtotal_amount")).isEqualTo(4);
@@ -265,21 +293,23 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void rollsBackBalanceAndMovementWhenLegacyAuditWriteFails() {
-        Long itemId = insertInventoryItem("ROLLBACK", new BigDecimal("0.0000"));
+        Long itemId = insertInventoryItem("ROLLBACK", new BigDecimal("1.0000"));
         Item item = itemRepository.findById(itemId).orElseThrow();
+        Sale sale = Sale.builder()
+            .id(itemId)
+            .code("X".repeat(101))
+            .items(List.of(SaleItem.builder()
+                .item(item)
+                .quantity(new BigDecimal("1.0000"))
+                .stockLocation(StockLocation.STORE)
+                .build()))
+            .build();
 
-        assertThatThrownBy(() -> stockMovementService.recordMovement(
-            MovementSourceType.OPENING_BALANCE,
-            itemId,
-            item,
-            new BigDecimal("1.0000"),
-            MovementType.IN,
-            "X".repeat(101),
-            StockLocation.STORE
-        )).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> stockMovementService.recordSaleMovements(sale))
+            .isInstanceOf(DataIntegrityViolationException.class);
 
         assertThat(itemRepository.findById(itemId).orElseThrow().getStockStore())
-            .isEqualByComparingTo("0.0000");
+            .isEqualByComparingTo("1.0000");
         assertThat(stockMovementRepository.findByProductId(itemId)).isEmpty();
         assertThat(jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM item_audit_logs WHERE item_id = ?", Long.class, itemId))
@@ -287,30 +317,24 @@ class PostgreSqlMigrationAndContextTest {
     }
 
     @Test
-    void oneOfTwoStaleConcurrentStockWritesFailsWithDomainConflict() throws Exception {
+    void oneOfTwoConcurrentSaleDeductionsFailsWithDomainConflict() throws Exception {
         Long itemId = insertInventoryItem("CONCURRENCY", new BigDecimal("1.0000"));
         Item firstView = itemRepository.findById(itemId).orElseThrow();
         Item secondView = itemRepository.findById(itemId).orElseThrow();
+        Sale firstSale = concurrentSale(itemId + 10_000, firstView);
+        Sale secondSale = concurrentSale(itemId + 20_000, secondView);
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         List<RuntimeException> outcomes;
         try {
-            List<CompletableFuture<RuntimeException>> attempts = List.of(firstView, secondView).stream()
-                .map(item -> CompletableFuture.supplyAsync(() -> {
+            List<CompletableFuture<RuntimeException>> attempts = List.of(firstSale, secondSale).stream()
+                .map(sale -> CompletableFuture.supplyAsync(() -> {
                     ready.countDown();
                     try {
                         start.await(10, TimeUnit.SECONDS);
-                        stockMovementService.recordMovement(
-                            MovementSourceType.SALE,
-                            itemId,
-                            item,
-                            new BigDecimal("0.7500"),
-                            MovementType.OUT,
-                            "CONCURRENT-SALE",
-                            StockLocation.STORE
-                        );
+                        stockMovementService.recordSaleMovements(sale);
                         return null;
                     } catch (InterruptedException exception) {
                         Thread.currentThread().interrupt();
@@ -334,6 +358,85 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(itemRepository.findById(itemId).orElseThrow().getStockStore())
             .isEqualByComparingTo("0.2500");
         assertThat(stockMovementRepository.findByProductId(itemId)).hasSize(1);
+    }
+
+    @Test
+    @Transactional
+    void createsAggregatedFractionalSaleWithSnapshotsAndOneDeduction() {
+        Long itemId = insertInventoryItem("SALE-INTEGRATION", new BigDecimal("1.0000"));
+        Item item = itemRepository.findById(itemId).orElseThrow();
+        CreateSaleRequest request = CreateSaleRequest.builder()
+            .paidAmount(new BigDecimal("7.5000"))
+            .discountAmount(BigDecimal.ZERO)
+            .paymentType(PaymentType.CASH)
+            .saleItemList(List.of(
+                saleLine(item.getSku(), "0.2500"),
+                saleLine(item.getSku(), "0.5000")
+            ))
+            .build();
+
+        SaleResponse response = saleService.createSale(request);
+
+        Sale savedSale = saleRepository.findByCode(response.getCode()).orElseThrow();
+        assertThat(savedSale.getItems()).hasSize(1);
+        assertThat(savedSale.getItems().getFirst().getQuantity()).isEqualByComparingTo("0.7500");
+        assertThat(savedSale.getItems().getFirst().getUnitPrice()).isEqualByComparingTo("10.0000");
+        assertThat(savedSale.getItems().getFirst().getSubtotal()).isEqualByComparingTo("7.5000");
+        assertThat(savedSale.getTotalAmount()).isEqualByComparingTo("7.5000");
+        assertThat(itemRepository.findById(itemId).orElseThrow().getStockStore())
+            .isEqualByComparingTo("0.2500");
+
+        var movements = stockMovementRepository.findBySourceTypeAndSourceId(
+            MovementSourceType.SALE, savedSale.getId());
+        assertThat(movements).singleElement().satisfies(movement -> {
+            assertThat(movement.getMovementType()).isEqualTo(MovementType.OUT);
+            assertThat(movement.getQuantity()).isEqualByComparingTo("0.7500");
+            assertThat(movement.getQtyBefore()).isEqualByComparingTo("1.0000");
+            assertThat(movement.getQtyAfter()).isEqualByComparingTo("0.2500");
+        });
+
+        stockMovementService.recordSaleMovements(savedSale);
+        assertThat(itemRepository.findById(itemId).orElseThrow().getStockStore())
+            .isEqualByComparingTo("0.2500");
+        assertThat(stockMovementRepository.findBySourceTypeAndSourceId(
+            MovementSourceType.SALE, savedSale.getId())).hasSize(1);
+    }
+
+    @Test
+    @Transactional
+    void createsCorrectionAsAbsoluteTargetWithDerivedMovement() {
+        Long itemId = insertInventoryItem("CORRECTION-INTEGRATION", new BigDecimal("1.0000"));
+        Item item = itemRepository.findById(itemId).orElseThrow();
+        CreateStockAdjustmentRequest request = CreateStockAdjustmentRequest.builder()
+            .reason("Physical count")
+            .items(List.of(StockAdjustmentItemRequest.builder()
+                .itemSku(item.getSku())
+                .changeQuantity(new BigDecimal("0.2500"))
+                .actionType(StockAdjustmentActionType.CORRECTION)
+                .stockLocation(StockLocation.STORE)
+                .build()))
+            .build();
+
+        StockAdjustmentResponse response = stockAdjustmentService.createStockAdjustment(request);
+
+        var adjustment = stockAdjustmentRepository
+            .findByStockAdjustmentCode(response.getStockAdjustmentCode()).orElseThrow();
+        assertThat(adjustment.getItems()).singleElement().satisfies(adjustmentItem -> {
+            assertThat(adjustmentItem.getChangeQuantity()).isEqualByComparingTo("0.2500");
+            assertThat(adjustmentItem.getPreviousStock()).isEqualByComparingTo("1.0000");
+            assertThat(adjustmentItem.getNewStock()).isEqualByComparingTo("0.2500");
+        });
+        assertThat(itemRepository.findById(itemId).orElseThrow().getStockStore())
+            .isEqualByComparingTo("0.2500");
+        assertThat(stockMovementRepository.findBySourceTypeAndSourceId(
+            MovementSourceType.STOCK_ADJUSTMENT, adjustment.getId()))
+            .singleElement()
+            .satisfies(movement -> {
+                assertThat(movement.getMovementType()).isEqualTo(MovementType.OUT);
+                assertThat(movement.getQuantity()).isEqualByComparingTo("0.7500");
+                assertThat(movement.getQtyBefore()).isEqualByComparingTo("1.0000");
+                assertThat(movement.getQtyAfter()).isEqualByComparingTo("0.2500");
+            });
     }
 
     private boolean tableExists(String tableName) {
@@ -419,6 +522,15 @@ class PostgreSqlMigrationAndContextTest {
         return Boolean.TRUE.equals(exists);
     }
 
+    private boolean indexExists(String indexName) {
+        Boolean exists = jdbcTemplate.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = ?)",
+            Boolean.class,
+            indexName
+        );
+        return Boolean.TRUE.equals(exists);
+    }
+
     private Long insertInventoryItem(String purpose, BigDecimal storeStock) {
         return jdbcTemplate.queryForObject(
             """
@@ -435,6 +547,26 @@ class PostgreSqlMigrationAndContextTest {
             storeStock,
             storeStock
         );
+    }
+
+    private Sale concurrentSale(long saleId, Item item) {
+        return Sale.builder()
+            .id(saleId)
+            .code("CONCURRENT-SALE-" + saleId)
+            .items(List.of(SaleItem.builder()
+                .item(item)
+                .quantity(new BigDecimal("0.7500"))
+                .stockLocation(StockLocation.STORE)
+                .build()))
+            .build();
+    }
+
+    private CreateSaleItemRequest saleLine(String sku, String quantity) {
+        return CreateSaleItemRequest.builder()
+            .itemSku(sku)
+            .quantity(new BigDecimal(quantity))
+            .stockLocation(StockLocation.STORE)
+            .build();
     }
 
     private static PostgreSQLContainer<?> startPostgresWhenRequired() {
