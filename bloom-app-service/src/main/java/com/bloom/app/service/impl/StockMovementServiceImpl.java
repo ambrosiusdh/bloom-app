@@ -10,7 +10,6 @@ import com.bloom.app.domain.model.*;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.ItemAuditLogRepository;
-import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.service.StockMovementService;
 import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -115,15 +116,46 @@ public class StockMovementServiceImpl implements StockMovementService {
     // Helper to record sales
     @Transactional
     public void recordSaleMovements(Sale sale) {
+        if (sale == null || sale.getId() == null) {
+            throw new IllegalArgumentException("Sale must be persisted before recording stock");
+        }
+        Map<StockKey, SaleMovement> movements = new LinkedHashMap<>();
         for (SaleItem saleItem : sale.getItems()) {
+            if (saleItem == null || saleItem.getItem() == null || saleItem.getItem().getId() == null) {
+                throw new IllegalArgumentException("Persisted sale item is required");
+            }
+            InventoryQuantityValidator.validateIncoming(
+                saleItem.getQuantity(), saleItem.getItem().isFractionalQuantityAllowed());
+            StockKey key = new StockKey(saleItem.getItem().getId(), saleItem.getStockLocation());
+            movements.merge(
+                key,
+                new SaleMovement(saleItem.getItem(), saleItem.getStockLocation(), saleItem.getQuantity()),
+                (existing, incoming) -> new SaleMovement(
+                    existing.item(),
+                    existing.stockLocation(),
+                    existing.quantity().add(incoming.quantity()))
+            );
+        }
+
+        for (SaleMovement movement : movements.values()) {
+            boolean alreadyRecorded = stockMovementRepository
+                .existsBySourceTypeAndSourceIdAndProduct_IdAndStockLocation(
+                    MovementSourceType.SALE,
+                    sale.getId(),
+                    movement.item().getId(),
+                    movement.stockLocation()
+                );
+            if (alreadyRecorded) {
+                continue;
+            }
             recordMovement(
                     MovementSourceType.SALE,
                     sale.getId(),
-                    saleItem.getItem(),
-                    saleItem.getQuantity(),
+                    movement.item(),
+                    movement.quantity(),
                     MovementType.OUT,
                     sale.getCode(),
-                    saleItem.getStockLocation()
+                    movement.stockLocation()
             );
         }
     }
@@ -132,46 +164,15 @@ public class StockMovementServiceImpl implements StockMovementService {
     @Transactional
     public void recordManualAdjustment(StockAdjustment adjustment) {
         for (StockAdjustmentItem item : adjustment.getItems()) {
-            MovementType type;
-            BigDecimal qty = item.getChangeQuantity();
+            AdjustmentMovement movement = adjustmentMovement(item);
 
-            // Logic to determine IN/OUT based on ActionType
-            // ADD -> IN
-            // REMOVE -> OUT
-            // CORRECTION -> Calculated delta.
-            // NOTE: The StockAdjustmentService already calculated delta logic before
-            // calling this?
-            // Or we move that logic here?
-            // User said: "StockAdjustment will generate StockMovement entries"
-            // The StockAdjustmentServiceImpl calculates 'changeQuantity' and 'newStock'.
-            // We should use the calculated changeQuantity.
-
-            if (item.getActionType() == StockAdjustmentActionType.ADD) {
-                type = MovementType.IN;
-            } else if (item.getActionType() == StockAdjustmentActionType.REMOVE) {
-                type = MovementType.OUT;
-            } else {
-                // CORRECTION: Since we don't store 'delta' directly in StockAdjustmentItem
-                // cleanly for IN/OUT
-                // (it stores changeQuantity and newStock), we need to derive.
-                // If previous < new, it's IN.
-                // If previous > new, it's OUT.
-                if (item.getNewStock().compareTo(item.getPreviousStock()) > 0) {
-                    type = MovementType.IN;
-                    qty = item.getNewStock().subtract(item.getPreviousStock());
-                } else {
-                    type = MovementType.OUT;
-                    qty = item.getPreviousStock().subtract(item.getNewStock());
-                }
-            }
-
-            if (qty.compareTo(BigDecimal.ZERO) > 0) { // Only record if there is a change
+            if (movement.quantity().compareTo(BigDecimal.ZERO) > 0) {
                 recordMovement(
                     MovementSourceType.STOCK_ADJUSTMENT,
                     adjustment.getId(),
                     item.getItem(),
-                    qty,
-                    type,
+                    movement.quantity(),
+                    movement.movementType(),
                     adjustment.getStockAdjustmentCode(),
                     item.getStockLocation()
                 );
@@ -197,5 +198,56 @@ public class StockMovementServiceImpl implements StockMovementService {
             case WAREHOUSE -> item.getStockWarehouse();
         };
         return stock == null ? BigDecimal.ZERO : stock;
+    }
+
+    private AdjustmentMovement adjustmentMovement(StockAdjustmentItem item) {
+        if (item == null || item.getItem() == null || item.getActionType() == null) {
+            throw new IllegalArgumentException("Complete stock adjustment item is required");
+        }
+        InventoryQuantityValidator.validateStock(
+            item.getPreviousStock(), item.getItem().isFractionalQuantityAllowed());
+        InventoryQuantityValidator.validateStock(
+            item.getNewStock(), item.getItem().isFractionalQuantityAllowed());
+
+        AdjustmentMovement movement = switch (item.getActionType()) {
+            case ADD -> {
+                InventoryQuantityValidator.validateIncoming(
+                    item.getChangeQuantity(), item.getItem().isFractionalQuantityAllowed());
+                yield new AdjustmentMovement(MovementType.IN, item.getChangeQuantity());
+            }
+            case REMOVE -> {
+                InventoryQuantityValidator.validateIncoming(
+                    item.getChangeQuantity(), item.getItem().isFractionalQuantityAllowed());
+                yield new AdjustmentMovement(MovementType.OUT, item.getChangeQuantity());
+            }
+            case CORRECTION -> {
+                InventoryQuantityValidator.validateStock(
+                    item.getChangeQuantity(), item.getItem().isFractionalQuantityAllowed());
+                if (item.getChangeQuantity().compareTo(item.getNewStock()) != 0) {
+                    throw new IllegalStateException("Correction target must equal resulting stock");
+                }
+                BigDecimal delta = item.getNewStock().subtract(item.getPreviousStock());
+                yield new AdjustmentMovement(
+                    delta.signum() >= 0 ? MovementType.IN : MovementType.OUT,
+                    delta.abs());
+            }
+        };
+
+        BigDecimal expectedNewStock = movement.movementType() == MovementType.IN
+            ? item.getPreviousStock().add(movement.quantity())
+            : item.getPreviousStock().subtract(movement.quantity());
+        if (expectedNewStock.compareTo(item.getNewStock()) != 0) {
+            throw new IllegalStateException("Stock adjustment balance snapshots are inconsistent");
+        }
+        return movement;
+    }
+
+    private record StockKey(Long itemId, StockLocation stockLocation) {
+    }
+
+    private record SaleMovement(Item item, StockLocation stockLocation, BigDecimal quantity) {
+    }
+
+    private record AdjustmentMovement(MovementType movementType, BigDecimal quantity) {
     }
 }

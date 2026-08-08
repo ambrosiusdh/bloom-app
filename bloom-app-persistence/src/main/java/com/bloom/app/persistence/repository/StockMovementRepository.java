@@ -1,6 +1,7 @@
 package com.bloom.app.persistence.repository;
 
 import com.bloom.app.domain.enums.MovementSourceType;
+import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.model.StockMovement;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -17,6 +18,13 @@ public interface StockMovementRepository
     List<StockMovement> findByCreatedAtBetween(Instant startDate, Instant endDate);
 
     List<StockMovement> findBySourceTypeAndSourceId(MovementSourceType sourceType, Long sourceId);
+
+    boolean existsBySourceTypeAndSourceIdAndProduct_IdAndStockLocation(
+        MovementSourceType sourceType,
+        Long sourceId,
+        Long productId,
+        StockLocation stockLocation
+    );
 
     boolean existsByProductId(Long productId);
 }

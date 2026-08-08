@@ -63,7 +63,17 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
         StockAdjustment stockAdjustment = stockAdjustmentMapper.createRequestToEntity(request);
         List<StockAdjustmentItem> stockAdjustmentItems = new ArrayList<>();
 
+        if (request.getItems() == null || request.getItems().isEmpty()) {
+            throw new IllegalArgumentException("Stock adjustment items are required");
+        }
+
         for (StockAdjustmentItemRequest itemRequest : request.getItems()) {
+            if (itemRequest == null) {
+                throw new IllegalArgumentException("Stock adjustment item is required");
+            }
+            if (itemRequest.getStockLocation() == null) {
+                throw new IllegalArgumentException("Stock location is required");
+            }
             Item item = itemRepository.findItemBySku(itemRequest.getItemSku())
                     .orElseThrow(() -> new ResourceNotFoundException("Item not found: " + itemRequest.getItemSku()));
 
@@ -73,16 +83,10 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
             BigDecimal requestedQuantity = itemRequest.getChangeQuantity();
             validateAdjustmentQuantity(
                 requestedQuantity, itemRequest.getActionType(), item.isFractionalQuantityAllowed());
-            BigDecimal changeQuantity = requestedQuantity;
             BigDecimal newStock = switch (itemRequest.getActionType()) {
-                case ADD -> previousStock.add(changeQuantity);
-                case REMOVE -> previousStock.subtract(changeQuantity);
-                case CORRECTION -> {
-                    BigDecimal absoluteValue = changeQuantity;
-                    // Recalculate delta for stock movement history later in the code
-                    changeQuantity = absoluteValue.subtract(previousStock);
-                    yield absoluteValue; // 'yield' returns the value from a multi-line block
-                }
+                case ADD -> previousStock.add(requestedQuantity);
+                case REMOVE -> previousStock.subtract(requestedQuantity);
+                case CORRECTION -> requestedQuantity;
             };
             InventoryQuantityValidator.validateStock(newStock, item.isFractionalQuantityAllowed());
 
@@ -90,7 +94,7 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                     .stockAdjustment(stockAdjustment)
                     .item(item)
                     .actionType(itemRequest.getActionType())
-                    .changeQuantity(changeQuantity)
+                    .changeQuantity(requestedQuantity)
                     .previousStock(previousStock)
                     .newStock(newStock)
                     .stockLocation(itemRequest.getStockLocation())

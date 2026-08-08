@@ -34,8 +34,12 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -62,52 +66,124 @@ public class SaleServiceImpl implements SaleService {
             throw new IllegalArgumentException("Cart is empty");
         }
 
-        for (CreateSaleItemRequest itemRequest : request.getSaleItemList()) {
-            Item item = itemRepository.findItemBySku(itemRequest.getItemSku())
-                    .orElseThrow(() -> new ResourceNotFoundException("Item not found: " + itemRequest.getItemSku()));
-            InventoryQuantityValidator.validateIncoming(
-                itemRequest.getQuantity(), item.isFractionalQuantityAllowed());
-            BigDecimal stockQuantity = itemRequest.getStockLocation().equals(StockLocation.STORE)
-                ? item.getStockStore() : item.getStockWarehouse();
+        for (AggregatedSaleLine line : aggregateSaleLines(request.getSaleItemList()).values()) {
+            Item item = line.item();
+            BigDecimal stockQuantity = stockAt(item, line.stockLocation());
 
-            if (stockQuantity.compareTo(itemRequest.getQuantity()) < 0) {
-                throw new BusinessException(ErrorCode.SALE_INSUFFICIENT_STOCK_STORE, item.getName(), itemRequest.getStockLocation());
+            if (stockQuantity.compareTo(line.quantity()) < 0) {
+                throw new BusinessException(
+                    ErrorCode.SALE_INSUFFICIENT_STOCK_STORE, item.getName(), line.stockLocation());
             }
 
             BigDecimal unitPrice = item.getPrice();
-            BigDecimal subtotal = unitPrice.multiply(itemRequest.getQuantity()).setScale(4, RoundingMode.HALF_UP);
+            if (unitPrice == null) {
+                throw new IllegalArgumentException("Item price is required: " + item.getSku());
+            }
+            BigDecimal subtotal = unitPrice.multiply(line.quantity())
+                .setScale(4, RoundingMode.HALF_UP);
 
             SaleItem saleItem = SaleItem.builder()
                     .item(item)
-                    .quantity(itemRequest.getQuantity())
+                    .quantity(line.quantity())
                     .unitPrice(unitPrice)
                     .subtotal(subtotal)
                     .sale(sale)
-                    .stockLocation(itemRequest.getStockLocation())
+                    .stockLocation(line.stockLocation())
                     .build();
 
             saleItems.add(saleItem);
             total = total.add(subtotal);
         }
 
+        BigDecimal subtotalAmount = total.setScale(4, RoundingMode.HALF_UP);
         BigDecimal discount = Optional.ofNullable(request.getDiscountAmount()).orElse(BigDecimal.ZERO);
-        BigDecimal totalAmount = total.subtract(discount);
-        if (sale.getPaidAmount().compareTo(sale.getTotalAmount()) < 0) {
+        BigDecimal totalAmount = subtotalAmount.subtract(discount).setScale(4, RoundingMode.HALF_UP);
+        BigDecimal paidAmount = request.getPaidAmount();
+        if (paidAmount == null) {
+            throw new IllegalArgumentException("Paid amount is required");
+        }
+        if (paidAmount.compareTo(totalAmount) < 0) {
             throw new BusinessException(ErrorCode.SALE_PAID_LESS_THAN_TOTAL);
         }
 
         sale.setCode(documentCounterService.generateNextCode(DocumentType.SALE));
         sale.setItems(saleItems);
         sale.setPaymentType(request.getPaymentType());
-        sale.setSubtotalAmount(total);
+        sale.setSubtotalAmount(subtotalAmount);
         sale.setDiscountAmount(discount);
         sale.setTotalAmount(totalAmount);
-        sale.setPaidAmount(request.getPaidAmount());
+        sale.setPaidAmount(paidAmount);
 
         Sale savedSale = saleRepository.save(sale);
         stockMovementService.recordSaleMovements(savedSale);
 
         return saleMapper.saleToResponse(savedSale);
+    }
+
+    private Map<SaleLineKey, AggregatedSaleLine> aggregateSaleLines(
+            List<CreateSaleItemRequest> itemRequests) {
+        Set<String> requestedSkus = new LinkedHashSet<>();
+        Map<SaleLineKey, AggregatedSaleLine> aggregatedLines = new LinkedHashMap<>();
+
+        for (CreateSaleItemRequest itemRequest : itemRequests) {
+            validateSaleLineIdentity(itemRequest);
+            requestedSkus.add(itemRequest.getItemSku());
+        }
+
+        Map<String, Item> itemsBySku = new LinkedHashMap<>();
+        itemRepository.findBySkuIn(new ArrayList<>(requestedSkus))
+            .forEach(item -> itemsBySku.put(item.getSku(), item));
+        for (String sku : requestedSkus) {
+            if (!itemsBySku.containsKey(sku)) {
+                throw new ResourceNotFoundException("Item not found: " + sku);
+            }
+        }
+
+        for (CreateSaleItemRequest itemRequest : itemRequests) {
+            String sku = itemRequest.getItemSku();
+            StockLocation stockLocation = itemRequest.getStockLocation();
+            Item item = itemsBySku.get(sku);
+            InventoryQuantityValidator.validateIncoming(
+                itemRequest.getQuantity(), item.isFractionalQuantityAllowed());
+
+            SaleLineKey key = new SaleLineKey(sku, stockLocation);
+            aggregatedLines.merge(
+                key,
+                new AggregatedSaleLine(item, stockLocation, itemRequest.getQuantity()),
+                (existing, incoming) -> new AggregatedSaleLine(
+                    existing.item(),
+                    existing.stockLocation(),
+                    existing.quantity().add(incoming.quantity()))
+            );
+        }
+        return aggregatedLines;
+    }
+
+    private void validateSaleLineIdentity(CreateSaleItemRequest itemRequest) {
+        if (itemRequest == null) {
+            throw new IllegalArgumentException("Sale item is required");
+        }
+        if (itemRequest.getItemSku() == null || itemRequest.getItemSku().isBlank()) {
+            throw new IllegalArgumentException("Item SKU is required");
+        }
+        if (itemRequest.getStockLocation() == null) {
+            throw new IllegalArgumentException("Stock location is required");
+        }
+    }
+
+    private BigDecimal stockAt(Item item, StockLocation stockLocation) {
+        BigDecimal stock = switch (stockLocation) {
+            case STORE -> item.getStockStore();
+            case WAREHOUSE -> item.getStockWarehouse();
+        };
+        return stock == null ? BigDecimal.ZERO : stock;
+    }
+
+    private record SaleLineKey(String itemSku, StockLocation stockLocation) {
+    }
+
+    private record AggregatedSaleLine(
+            Item item, StockLocation stockLocation, BigDecimal quantity) {
     }
 
     @Override
