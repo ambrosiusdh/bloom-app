@@ -17,4 +17,6 @@ public interface StockMovementRepository
     List<StockMovement> findByCreatedAtBetween(Instant startDate, Instant endDate);
 
     List<StockMovement> findBySourceTypeAndSourceId(MovementSourceType sourceType, Long sourceId);
+
+    boolean existsByProductId(Long productId);
 }

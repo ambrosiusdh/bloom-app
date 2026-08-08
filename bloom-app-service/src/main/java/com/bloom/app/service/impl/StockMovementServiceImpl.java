@@ -3,6 +3,9 @@ package com.bloom.app.service.impl;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
+import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
+import com.bloom.app.domain.exception.InsufficientStockException;
+import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.model.*;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
@@ -14,8 +17,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.math.BigDecimal;
 
@@ -42,24 +44,34 @@ public class StockMovementServiceImpl implements StockMovementService {
         String referenceNo,
         StockLocation stockLocation
     ) {
+        if (item == null) {
+            throw new IllegalArgumentException("Item is required");
+        }
+        if (item.getId() == null) {
+            throw new IllegalArgumentException("Item must be persisted before recording stock");
+        }
+        if (sourceType == null) {
+            throw new IllegalArgumentException("Movement source type is required");
+        }
+        if (sourceId == null) {
+            throw new IllegalArgumentException("Movement source id is required");
+        }
+        if (movementType == null) {
+            throw new IllegalArgumentException("Movement type is required");
+        }
+        if (stockLocation == null) {
+            throw new IllegalArgumentException("Stock location is required");
+        }
         log.debug("Recording movement: item={}, qty={}, type={}, source={}, location={}", item.getSku(), quantity, movementType,
                 sourceType, stockLocation);
 
         InventoryQuantityValidator.validateIncoming(quantity, item.isFractionalQuantityAllowed());
 
-        BigDecimal previousStock = (stockLocation == StockLocation.STORE)
-                ? (item.getStockStore() != null ? item.getStockStore() : BigDecimal.ZERO)
-                : (item.getStockWarehouse() != null ? item.getStockWarehouse() : BigDecimal.ZERO);
-        BigDecimal newStock;
-
-        if (movementType == MovementType.IN) {
-            newStock = previousStock.add(quantity);
-        } else {
-            newStock = previousStock.subtract(quantity);
-            if (newStock.compareTo(BigDecimal.ZERO) < 0) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Insufficient stock in " + stockLocation + " for item: " + item.getSku());
-            }
+        BigDecimal previousStock = stockAt(item, stockLocation);
+        BigDecimal signedEffect = movementType == MovementType.IN ? quantity : quantity.negate();
+        BigDecimal newStock = previousStock.add(signedEffect);
+        if (newStock.compareTo(BigDecimal.ZERO) < 0) {
+            throw new InsufficientStockException(item.getSku(), stockLocation);
         }
         InventoryQuantityValidator.validateStock(newStock, item.isFractionalQuantityAllowed());
 
@@ -69,11 +81,16 @@ public class StockMovementServiceImpl implements StockMovementService {
         } else {
             item.setStockWarehouse(newStock);
         }
-        itemRepository.save(item);
+        Item persistedItem;
+        try {
+            persistedItem = itemRepository.saveAndFlush(item);
+        } catch (OptimisticLockingFailureException exception) {
+            throw new StockConcurrencyException(item.getSku(), exception);
+        }
 
         // 2. Create StockMovement (Ledger)
         StockMovement movement = StockMovement.builder()
-                .product(item)
+                .product(persistedItem)
                 .movementType(movementType)
                 .sourceType(sourceType)
                 .sourceId(sourceId)
@@ -82,17 +99,17 @@ public class StockMovementServiceImpl implements StockMovementService {
                 .qtyBefore(previousStock)
                 .qtyAfter(newStock)
                 .build();
-        stockMovementRepository.save(movement);
+        stockMovementRepository.saveAndFlush(movement);
 
         ItemAuditLog auditLog = ItemAuditLog.builder()
-                .item(item)
+                .item(persistedItem)
                 .qty(quantity)
                 .qtyBefore(previousStock)
                 .qtyAfter(newStock)
                 .source(sourceType)
                 .referenceNo(referenceNo)
                 .build();
-        itemAuditLogRepository.save(auditLog);
+        itemAuditLogRepository.saveAndFlush(auditLog);
     }
 
     // Helper to record sales
@@ -160,5 +177,25 @@ public class StockMovementServiceImpl implements StockMovementService {
                 );
             }
         }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void validateBaseUnitOfMeasureChange(Item item, UnitOfMeasure requestedUnitOfMeasure) {
+        if (item == null || requestedUnitOfMeasure == null
+                || requestedUnitOfMeasure == item.getBaseUnitOfMeasure()) {
+            return;
+        }
+        if (item.getId() != null && stockMovementRepository.existsByProductId(item.getId())) {
+            throw new BaseUnitOfMeasureImmutableException(item.getSku());
+        }
+    }
+
+    private BigDecimal stockAt(Item item, StockLocation stockLocation) {
+        BigDecimal stock = switch (stockLocation) {
+            case STORE -> item.getStockStore();
+            case WAREHOUSE -> item.getStockWarehouse();
+        };
+        return stock == null ? BigDecimal.ZERO : stock;
     }
 }
