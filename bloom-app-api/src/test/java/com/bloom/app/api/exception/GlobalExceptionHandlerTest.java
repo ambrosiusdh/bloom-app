@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
+import com.bloom.app.domain.exception.IdempotencyConflictException;
 
 import java.util.Map;
 
@@ -44,5 +45,17 @@ class GlobalExceptionHandlerTest {
         assertThat(body.get("errorType")).isEqualTo("StockConcurrencyException");
         assertThat(body.get("message")).isEqualTo(
             "Stock for item ITEM-1 was modified concurrently. Reload and retry.");
+    }
+
+    @Test
+    void returnsConflictForReusedIdempotencyKeyWithDifferentPayload() {
+        var response = handler.handleInventoryConflict(new IdempotencyConflictException());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        Map<?, ?> body = (Map<?, ?>) response.getBody();
+        assertThat(body.get("code")).isEqualTo(HttpStatus.CONFLICT.value());
+        assertThat(body.get("errorType")).isEqualTo("IdempotencyConflictException");
+        assertThat(body.get("message")).isEqualTo(
+            "Idempotency key has already been used for a different stock transfer request");
     }
 }

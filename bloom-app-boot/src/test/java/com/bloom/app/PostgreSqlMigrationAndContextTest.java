@@ -4,8 +4,11 @@ import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
 import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
 import com.bloom.app.api.dto.request.stockadjustment.CreateStockAdjustmentRequest;
 import com.bloom.app.api.dto.request.stockadjustment.StockAdjustmentItemRequest;
+import com.bloom.app.api.dto.request.stocktransfer.CreateStockTransferRequest;
+import com.bloom.app.api.dto.request.stocktransfer.StockTransferLineRequest;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
+import com.bloom.app.api.dto.response.stocktransfer.StockTransferResponse;
 import com.bloom.app.domain.enums.DocumentType;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
@@ -13,19 +16,24 @@ import com.bloom.app.domain.enums.PaymentType;
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.StockConcurrencyException;
+import com.bloom.app.domain.exception.IdempotencyConflictException;
 import com.bloom.app.domain.model.DocumentCounter;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.SaleItem;
+import com.bloom.app.domain.model.StockTransfer;
+import com.bloom.app.domain.model.UnitOfMeasure;
 import com.bloom.app.persistence.repository.DocumentCounterRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.ItemCategoryCounterRepository;
 import com.bloom.app.persistence.repository.SaleRepository;
 import com.bloom.app.persistence.repository.StockAdjustmentRepository;
 import com.bloom.app.persistence.repository.StockMovementRepository;
+import com.bloom.app.persistence.repository.StockTransferRepository;
 import com.bloom.app.service.SaleService;
 import com.bloom.app.service.StockAdjustmentService;
 import com.bloom.app.service.StockMovementService;
+import com.bloom.app.service.StockTransferService;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -34,6 +42,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
@@ -97,6 +106,12 @@ class PostgreSqlMigrationAndContextTest {
     @Autowired
     private StockAdjustmentRepository stockAdjustmentRepository;
 
+    @Autowired
+    private StockTransferRepository stockTransferRepository;
+
+    @Autowired
+    private StockTransferService stockTransferService;
+
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
         if (POSTGRES != null) {
@@ -125,7 +140,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsLegacyStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("10");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
@@ -150,6 +165,8 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(tableExists("suppliers")).isTrue();
         assertThat(tableExists("cash_sessions")).isTrue();
         assertThat(tableExists("expenses")).isTrue();
+        assertThat(tableExists("stock_transfers")).isTrue();
+        assertThat(tableExists("stock_transfer_lines")).isTrue();
         assertThat(columnExists("cash_sessions", "version")).isTrue();
         assertThat(columnExists("expenses", "version")).isTrue();
         assertThat(columnExists("item_category_counters", "version")).isFalse();
@@ -166,6 +183,7 @@ class PostgreSqlMigrationAndContextTest {
             "chk_stock_movements_balance_equation"
         )).isTrue();
         assertThat(indexExists("uq_stock_movements_sale_item_location")).isTrue();
+        assertThat(indexExists("uq_stock_movements_transfer_item_location")).isTrue();
 
         assertThat(numericScale("items", "price")).isEqualTo(4);
         assertThat(numericScale("sales", "subtotal_amount")).isEqualTo(4);
@@ -194,6 +212,7 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(numericScale("item_audit_logs", "qty")).isEqualTo(4);
         assertThat(numericScale("item_audit_logs", "qty_before")).isEqualTo(4);
         assertThat(numericScale("item_audit_logs", "qty_after")).isEqualTo(4);
+        assertThat(numericScale("stock_transfer_lines", "quantity")).isEqualTo(4);
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
             UPDATE items SET stock_store = -0.0001 WHERE id = 1
@@ -439,6 +458,142 @@ class PostgreSqlMigrationAndContextTest {
             });
     }
 
+    @Test
+    void createsMultiLineTransferAndReplaysIdenticalRequestWithoutMoreMovements() {
+        Long firstItemId = insertInventoryItem("TRANSFER-FIRST", new BigDecimal("5.0000"));
+        Long secondItemId = insertInventoryItem("TRANSFER-SECOND", new BigDecimal("3.0000"));
+        Item firstItem = itemRepository.findById(firstItemId).orElseThrow();
+        Item secondItem = itemRepository.findById(secondItemId).orElseThrow();
+        String requestKey = "transfer-" + UUID.randomUUID();
+        CreateStockTransferRequest request = transferRequest(
+            "Store replenishment",
+            transferLine(firstItem.getSku(), "1.2500"),
+            transferLine(secondItem.getSku(), "0.5000")
+        );
+
+        StockTransferResponse created = stockTransferService.createStockTransfer(requestKey, request);
+        StockTransfer saved = stockTransferRepository.findByRequestKey(requestKey).orElseThrow();
+
+        assertThat(created.getId()).isEqualTo(saved.getId());
+        assertThat(created.getCode()).isEqualTo(saved.getCode());
+        assertThat(created.getRequestKey()).isEqualTo(requestKey);
+        assertThat(created.getSourceLocation()).isEqualTo(StockLocation.STORE);
+        assertThat(created.getDestinationLocation()).isEqualTo(StockLocation.WAREHOUSE);
+        assertThat(created.getLines()).hasSize(2);
+        assertThat(saved.getLines()).extracting(line -> line.getQuantity())
+            .containsExactlyInAnyOrder(new BigDecimal("1.2500"), new BigDecimal("0.5000"));
+
+        assertThat(itemRepository.findById(firstItemId).orElseThrow()).satisfies(item -> {
+            assertThat(item.getStockStore()).isEqualByComparingTo("3.7500");
+            assertThat(item.getStockWarehouse()).isEqualByComparingTo("1.2500");
+        });
+        assertThat(itemRepository.findById(secondItemId).orElseThrow()).satisfies(item -> {
+            assertThat(item.getStockStore()).isEqualByComparingTo("2.5000");
+            assertThat(item.getStockWarehouse()).isEqualByComparingTo("0.5000");
+        });
+
+        var movements = stockMovementRepository.findBySourceTypeAndSourceId(
+            MovementSourceType.TRANSFER, saved.getId());
+        assertThat(movements).hasSize(4);
+        assertThat(movements).allSatisfy(movement -> {
+            assertThat(movement.getSourceType()).isEqualTo(MovementSourceType.TRANSFER);
+            assertThat(movement.getSourceId()).isEqualTo(saved.getId());
+        });
+        assertThat(movements).filteredOn(movement -> movement.getMovementType() == MovementType.OUT)
+            .extracting(movement -> movement.getStockLocation())
+            .containsOnly(StockLocation.STORE);
+        assertThat(movements).filteredOn(movement -> movement.getMovementType() == MovementType.IN)
+            .extracting(movement -> movement.getStockLocation())
+            .containsOnly(StockLocation.WAREHOUSE);
+        assertThat(jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*) FROM item_audit_logs
+            WHERE source = 'TRANSFER' AND reference_no = ?
+            """,
+            Long.class,
+            saved.getCode()
+        )).isEqualTo(4L);
+
+        StockTransferResponse replayed = stockTransferService.createStockTransfer(requestKey, request);
+        assertThat(replayed.getId()).isEqualTo(created.getId());
+        assertThat(replayed.getCode()).isEqualTo(created.getCode());
+        assertThat(stockMovementRepository.findBySourceTypeAndSourceId(
+            MovementSourceType.TRANSFER, saved.getId())).hasSize(4);
+
+        CreateStockTransferRequest changedRequest = transferRequest(
+            "Different semantic request",
+            transferLine(firstItem.getSku(), "1.2500"),
+            transferLine(secondItem.getSku(), "0.5000")
+        );
+        assertThatThrownBy(() -> stockTransferService.createStockTransfer(requestKey, changedRequest))
+            .isInstanceOf(IdempotencyConflictException.class)
+            .hasMessage("Idempotency key has already been used for a different stock transfer request");
+    }
+
+    @Test
+    void rollsBackCompleteMultiLineTransferWhenInjectedInboundWriteFails() {
+        Long firstItemId = insertInventoryItem("TRANSFER-ROLLBACK-FIRST", new BigDecimal("5.0000"));
+        Long failingItemId = insertInventoryItem("TRANSFER-ROLLBACK-SECOND", new BigDecimal("3.0000"));
+        Item firstItem = itemRepository.findById(firstItemId).orElseThrow();
+        Item failingItem = itemRepository.findById(failingItemId).orElseThrow();
+        String requestKey = "transfer-rollback-" + UUID.randomUUID();
+        CreateStockTransferRequest request = transferRequest(
+            "Injected failure",
+            transferLine(firstItem.getSku(), "1.0000"),
+            transferLine(failingItem.getSku(), "1.0000")
+        );
+
+        jdbcTemplate.execute("""
+            CREATE OR REPLACE FUNCTION fail_stock_transfer_inbound()
+            RETURNS trigger AS $$
+            BEGIN
+                IF NEW.source_type = 'TRANSFER'
+                   AND NEW.movement_type = 'IN'
+                   AND NEW.product_id = %d THEN
+                    RAISE EXCEPTION 'injected transfer inbound failure';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """.formatted(failingItemId));
+        jdbcTemplate.execute("""
+            CREATE TRIGGER trg_fail_stock_transfer_inbound
+            BEFORE INSERT ON stock_movements
+            FOR EACH ROW EXECUTE FUNCTION fail_stock_transfer_inbound()
+            """);
+
+        try {
+            assertThatThrownBy(() -> stockTransferService.createStockTransfer(requestKey, request))
+                .isInstanceOf(JpaSystemException.class)
+                .hasMessageContaining("injected transfer inbound failure");
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_fail_stock_transfer_inbound ON stock_movements");
+            jdbcTemplate.execute("DROP FUNCTION IF EXISTS fail_stock_transfer_inbound()");
+        }
+
+        assertThat(stockTransferRepository.findByRequestKey(requestKey)).isEmpty();
+        assertThat(itemRepository.findById(firstItemId).orElseThrow()).satisfies(item -> {
+            assertThat(item.getStockStore()).isEqualByComparingTo("5.0000");
+            assertThat(item.getStockWarehouse()).isEqualByComparingTo("0.0000");
+        });
+        assertThat(itemRepository.findById(failingItemId).orElseThrow()).satisfies(item -> {
+            assertThat(item.getStockStore()).isEqualByComparingTo("3.0000");
+            assertThat(item.getStockWarehouse()).isEqualByComparingTo("0.0000");
+        });
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM stock_movements WHERE product_id IN (?, ?)",
+            Long.class,
+            firstItemId,
+            failingItemId
+        )).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM item_audit_logs WHERE item_id IN (?, ?)",
+            Long.class,
+            firstItemId,
+            failingItemId
+        )).isZero();
+    }
+
     private boolean tableExists(String tableName) {
         Boolean exists = jdbcTemplate.queryForObject(
             """
@@ -566,6 +721,24 @@ class PostgreSqlMigrationAndContextTest {
             .itemSku(sku)
             .quantity(new BigDecimal(quantity))
             .stockLocation(StockLocation.STORE)
+            .build();
+    }
+
+    private CreateStockTransferRequest transferRequest(
+            String description, StockTransferLineRequest... lines) {
+        return CreateStockTransferRequest.builder()
+            .sourceLocation(StockLocation.STORE)
+            .destinationLocation(StockLocation.WAREHOUSE)
+            .description(description)
+            .lines(List.of(lines))
+            .build();
+    }
+
+    private StockTransferLineRequest transferLine(String sku, String quantity) {
+        return StockTransferLineRequest.builder()
+            .itemSku(sku)
+            .quantity(new BigDecimal(quantity))
+            .unitOfMeasure(UnitOfMeasure.PIECE)
             .build();
     }
 
