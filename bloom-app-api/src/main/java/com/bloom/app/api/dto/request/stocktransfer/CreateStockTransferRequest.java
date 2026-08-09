@@ -28,7 +28,9 @@ public class CreateStockTransferRequest {
     private String description;
 
     @NotEmpty(message = "Transfer lines are required")
-    @Valid
     @UniqueBy(property = "itemSku", message = "Duplicate item lines are not allowed")
-    private List<StockTransferLineRequest> lines;
+    private List<
+        @NotNull(message = "Transfer line is required")
+        @Valid StockTransferLineRequest
+    > lines;
 }

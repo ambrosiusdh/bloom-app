@@ -28,6 +28,8 @@ CREATE TABLE stock_transfer_lines (
     id BIGSERIAL PRIMARY KEY,
     stock_transfer_id BIGINT NOT NULL,
     item_id BIGINT NOT NULL,
+    item_sku VARCHAR(255) NOT NULL,
+    unit_of_measure VARCHAR(30) NOT NULL,
     quantity NUMERIC(19,4) NOT NULL,
     CONSTRAINT fk_stock_transfer_lines_transfer
         FOREIGN KEY (stock_transfer_id) REFERENCES stock_transfers(id) ON DELETE CASCADE,
@@ -50,3 +52,7 @@ COMMENT ON COLUMN stock_transfers.request_hash IS
     'SHA-256 of the canonical semantic request, used to detect request-key reuse';
 COMMENT ON COLUMN stock_transfer_lines.quantity IS
     'Quantity expressed directly in the item base unit of measure; no conversion';
+COMMENT ON COLUMN stock_transfer_lines.item_sku IS
+    'Immutable item SKU snapshot used by historical and idempotent responses';
+COMMENT ON COLUMN stock_transfer_lines.unit_of_measure IS
+    'Immutable base-unit snapshot for the transferred quantity';

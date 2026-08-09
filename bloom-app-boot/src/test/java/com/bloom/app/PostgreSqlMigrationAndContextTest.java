@@ -42,7 +42,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.orm.jpa.JpaSystemException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
@@ -213,6 +213,8 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(numericScale("item_audit_logs", "qty_before")).isEqualTo(4);
         assertThat(numericScale("item_audit_logs", "qty_after")).isEqualTo(4);
         assertThat(numericScale("stock_transfer_lines", "quantity")).isEqualTo(4);
+        assertThat(columnExists("stock_transfer_lines", "item_sku")).isTrue();
+        assertThat(columnExists("stock_transfer_lines", "unit_of_measure")).isTrue();
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
             UPDATE items SET stock_store = -0.0001 WHERE id = 1
@@ -480,6 +482,10 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(created.getSourceLocation()).isEqualTo(StockLocation.STORE);
         assertThat(created.getDestinationLocation()).isEqualTo(StockLocation.WAREHOUSE);
         assertThat(created.getLines()).hasSize(2);
+        assertThat(created.getLines()).extracting(line -> line.getItemSku())
+            .containsExactly(firstItem.getSku(), secondItem.getSku());
+        assertThat(created.getLines()).extracting(line -> line.getUnitOfMeasure())
+            .containsOnly(UnitOfMeasure.PIECE);
         assertThat(saved.getLines()).extracting(line -> line.getQuantity())
             .containsExactlyInAnyOrder(new BigDecimal("1.2500"), new BigDecimal("0.5000"));
 
@@ -514,9 +520,16 @@ class PostgreSqlMigrationAndContextTest {
             saved.getCode()
         )).isEqualTo(4L);
 
+        String renamedSku = "RENAMED-" + UUID.randomUUID();
+        jdbcTemplate.update(
+            "UPDATE items SET name = ?, sku = ?, version = version + 1 WHERE id = ?",
+            "Renamed after transfer",
+            renamedSku,
+            firstItemId
+        );
+
         StockTransferResponse replayed = stockTransferService.createStockTransfer(requestKey, request);
-        assertThat(replayed.getId()).isEqualTo(created.getId());
-        assertThat(replayed.getCode()).isEqualTo(created.getCode());
+        assertThat(replayed).usingRecursiveComparison().isEqualTo(created);
         assertThat(stockMovementRepository.findBySourceTypeAndSourceId(
             MovementSourceType.TRANSFER, saved.getId())).hasSize(4);
 
@@ -564,7 +577,7 @@ class PostgreSqlMigrationAndContextTest {
 
         try {
             assertThatThrownBy(() -> stockTransferService.createStockTransfer(requestKey, request))
-                .isInstanceOf(JpaSystemException.class)
+                .isInstanceOf(DataAccessException.class)
                 .hasMessageContaining("injected transfer inbound failure");
         } finally {
             jdbcTemplate.execute("DROP TRIGGER IF EXISTS trg_fail_stock_transfer_inbound ON stock_movements");
@@ -592,6 +605,55 @@ class PostgreSqlMigrationAndContextTest {
             firstItemId,
             failingItemId
         )).isZero();
+    }
+
+    @Test
+    void serializesConcurrentIdenticalRequestKeysAndWritesMovementsOnce() throws Exception {
+        Long itemId = insertInventoryItem("TRANSFER-CONCURRENT-RETRY", new BigDecimal("2.0000"));
+        Item item = itemRepository.findById(itemId).orElseThrow();
+        String requestKey = "transfer-concurrent-" + UUID.randomUUID();
+        CreateStockTransferRequest request = transferRequest(
+            "Concurrent retry",
+            transferLine(item.getSku(), "0.5000")
+        );
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        List<StockTransferResponse> results;
+        try {
+            List<CompletableFuture<StockTransferResponse>> attempts = Stream.generate(() ->
+                    CompletableFuture.supplyAsync(() -> {
+                        ready.countDown();
+                        try {
+                            start.await(10, TimeUnit.SECONDS);
+                            return stockTransferService.createStockTransfer(requestKey, request);
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException(exception);
+                        }
+                    }, executor)
+                )
+                .limit(2)
+                .toList();
+
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            results = attempts.stream().map(CompletableFuture::join).toList();
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+
+        assertThat(results).extracting(StockTransferResponse::getId).containsOnly(results.getFirst().getId());
+        assertThat(results.get(1)).usingRecursiveComparison().isEqualTo(results.getFirst());
+        StockTransfer transfer = stockTransferRepository.findByRequestKey(requestKey).orElseThrow();
+        assertThat(stockMovementRepository.findBySourceTypeAndSourceId(
+            MovementSourceType.TRANSFER, transfer.getId())).hasSize(2);
+        assertThat(itemRepository.findById(itemId).orElseThrow()).satisfies(reloaded -> {
+            assertThat(reloaded.getStockStore()).isEqualByComparingTo("1.5000");
+            assertThat(reloaded.getStockWarehouse()).isEqualByComparingTo("0.5000");
+        });
     }
 
     private boolean tableExists(String tableName) {

@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
+import java.time.Instant;
 
 @Repository
 public interface StockTransferRepository extends JpaRepository<StockTransfer, Long> {
@@ -17,9 +18,12 @@ public interface StockTransferRepository extends JpaRepository<StockTransfer, Lo
     )
     void lockRequestKey(@Param("requestKey") String requestKey);
 
-    @EntityGraph(attributePaths = {"lines", "lines.item", "lines.item.category"})
+    @EntityGraph(attributePaths = {"lines", "lines.item"})
     Optional<StockTransfer> findByRequestKey(String requestKey);
 
-    @EntityGraph(attributePaths = {"lines", "lines.item", "lines.item.category"})
+    @EntityGraph(attributePaths = {"lines", "lines.item"})
     Optional<StockTransfer> findByCode(String code);
+
+    @Query("SELECT transfer.createdAt FROM StockTransfer transfer WHERE transfer.id = :id")
+    Instant findPersistedCreatedAtById(@Param("id") Long id);
 }

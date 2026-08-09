@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -106,7 +107,9 @@ public class StockTransferServiceImpl implements StockTransferService {
             .map(line -> StockTransferLine.builder()
                 .stockTransfer(transfer)
                 .item(line.item())
-                .quantity(line.quantity())
+                .itemSku(line.item().getSku())
+                .unitOfMeasure(line.item().getBaseUnitOfMeasure())
+                .quantity(normalizeStoredQuantity(line.quantity()))
                 .build())
             .toList());
         transfer.setLines(transferLines);
@@ -133,6 +136,8 @@ public class StockTransferServiceImpl implements StockTransferService {
             );
         }
 
+        savedTransfer.setCreatedAt(
+            stockTransferRepository.findPersistedCreatedAtById(savedTransfer.getId()));
         log.debug("Created stock transfer {} with {} lines", savedTransfer.getCode(), transferLines.size());
         return stockTransferMapper.toResponse(savedTransfer);
     }
@@ -223,27 +228,38 @@ public class StockTransferServiceImpl implements StockTransferService {
     }
 
     private String requestHash(CreateStockTransferRequest request) {
-        StringBuilder canonical = new StringBuilder()
-            .append(request.getSourceLocation().name()).append('\n')
-            .append(request.getDestinationLocation().name()).append('\n')
-            .append(canonicalDescription(request.getDescription())).append('\n');
-        request.getLines().stream()
-            .sorted(Comparator.comparing(line -> line.getItemSku().trim()))
-            .forEach(line -> canonical
-                .append(line.getItemSku().trim()).append('|')
-                .append(canonicalQuantity(line.getQuantity())).append('|')
-                .append(line.getUnitOfMeasure().name()).append('\n'));
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(
-                digest.digest(canonical.toString().getBytes(StandardCharsets.UTF_8)));
+            updateHashField(digest, request.getSourceLocation().name());
+            updateHashField(digest, request.getDestinationLocation().name());
+            updateHashField(digest, canonicalDescription(request.getDescription()));
+            List<StockTransferLineRequest> sortedLines = request.getLines().stream()
+                .sorted(Comparator.comparing(line -> line.getItemSku().trim()))
+                .toList();
+            digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(sortedLines.size()).array());
+            for (StockTransferLineRequest line : sortedLines) {
+                updateHashField(digest, line.getItemSku().trim());
+                updateHashField(digest, canonicalQuantity(line.getQuantity()));
+                updateHashField(digest, line.getUnitOfMeasure().name());
+            }
+            return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is not available", exception);
         }
     }
 
+    private void updateHashField(MessageDigest digest, String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
+        digest.update(bytes);
+    }
+
     private String canonicalQuantity(BigDecimal quantity) {
         return quantity.stripTrailingZeros().toPlainString();
+    }
+
+    private BigDecimal normalizeStoredQuantity(BigDecimal quantity) {
+        return quantity.setScale(InventoryQuantityValidator.MAX_SCALE);
     }
 
     private String normalizeDescription(String description) {

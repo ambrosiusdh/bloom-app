@@ -46,7 +46,7 @@ public class StockTransferController {
     @GetMapping("/details")
     @Operation(summary = "Get Stock Transfer Details")
     public ResponseEntity<ApiResponse<StockTransferResponse>> getStockTransferDetails(
-        @RequestParam String code
+        @RequestParam @NotBlank(message = "Stock transfer code is required") String code
     ) {
         return ResponseHelper.ok(stockTransferService.getStockTransferDetails(code));
     }

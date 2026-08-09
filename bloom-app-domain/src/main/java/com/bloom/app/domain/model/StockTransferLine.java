@@ -1,5 +1,7 @@
 package com.bloom.app.domain.model;
 
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -15,6 +17,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.Immutable;
 
 import java.math.BigDecimal;
 
@@ -22,6 +25,7 @@ import java.math.BigDecimal;
 @Setter
 @Entity
 @Builder
+@Immutable
 @NoArgsConstructor
 @AllArgsConstructor
 @Table(
@@ -37,13 +41,20 @@ public class StockTransferLine {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "stock_transfer_id", nullable = false)
+    @JoinColumn(name = "stock_transfer_id", nullable = false, updatable = false)
     private StockTransfer stockTransfer;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "item_id", nullable = false)
+    @JoinColumn(name = "item_id", nullable = false, updatable = false)
     private Item item;
 
-    @Column(name = "quantity", nullable = false, precision = 19, scale = 4)
+    @Column(name = "item_sku", nullable = false, updatable = false)
+    private String itemSku;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "unit_of_measure", nullable = false, length = 30, updatable = false)
+    private UnitOfMeasure unitOfMeasure;
+
+    @Column(name = "quantity", nullable = false, precision = 19, scale = 4, updatable = false)
     private BigDecimal quantity;
 }

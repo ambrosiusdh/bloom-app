@@ -5,8 +5,8 @@ import com.bloom.app.domain.model.StockTransferLine;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
-@Mapper(componentModel = "spring", uses = ItemMapper.class)
+@Mapper(componentModel = "spring")
 public interface StockTransferLineMapper {
-    @Mapping(target = "item", source = "item")
+    @Mapping(target = "itemId", source = "item.id")
     StockTransferLineResponse toResponse(StockTransferLine line);
 }

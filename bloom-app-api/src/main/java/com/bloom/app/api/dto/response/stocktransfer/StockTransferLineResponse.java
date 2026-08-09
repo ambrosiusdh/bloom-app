@@ -1,6 +1,6 @@
 package com.bloom.app.api.dto.response.stocktransfer;
 
-import com.bloom.app.api.dto.response.item.ItemResponse;
+import com.bloom.app.domain.model.UnitOfMeasure;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -14,6 +14,8 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 public class StockTransferLineResponse {
     private Long id;
-    private ItemResponse item;
+    private Long itemId;
+    private String itemSku;
     private BigDecimal quantity;
+    private UnitOfMeasure unitOfMeasure;
 }

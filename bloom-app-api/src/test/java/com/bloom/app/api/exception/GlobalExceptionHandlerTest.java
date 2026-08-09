@@ -58,4 +58,15 @@ class GlobalExceptionHandlerTest {
         assertThat(body.get("message")).isEqualTo(
             "Idempotency key has already been used for a different stock transfer request");
     }
+
+    @Test
+    void returnsBadRequestForIllegalArgumentException() {
+        var response = handler.handleIllegalArgumentException(
+            new IllegalArgumentException("Source and destination locations must differ"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        Map<?, ?> body = (Map<?, ?>) response.getBody();
+        assertThat(body.get("code")).isEqualTo(HttpStatus.BAD_REQUEST.value());
+        assertThat(body.get("errorType")).isEqualTo("IllegalArgumentException");
+    }
 }

@@ -27,6 +27,9 @@ public class UniqueByValidator implements ConstraintValidator<UniqueBy, List<?>>
 
         try {
             for (Object element : value) {
+                if (element == null) {
+                    return false;
+                }
                 Field field = element.getClass().getDeclaredField(property);
                 field.setAccessible(true);
                 Object fieldValue = field.get(element);

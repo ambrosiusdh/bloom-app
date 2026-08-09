@@ -76,6 +76,10 @@ class StockTransferServiceImplTest {
         assertThat(result).isSameAs(expected);
         assertThat(transfer.getLines()).extracting(line -> line.getItem().getId())
             .containsExactly(10L, 20L);
+        assertThat(transfer.getLines()).extracting(line -> line.getItemSku())
+            .containsExactly("ITEM-10", "ITEM-20");
+        assertThat(transfer.getLines()).extracting(line -> line.getUnitOfMeasure())
+            .containsOnly(UnitOfMeasure.METER);
         verify(stockTransferRepository).lockRequestKey("request-1");
         InOrder movementOrder = inOrder(stockMovementService);
         verifyMovement(movementOrder, earlierItem, "0.2500", MovementType.OUT, StockLocation.STORE);
@@ -105,7 +109,10 @@ class StockTransferServiceImplTest {
         when(stockTransferMapper.toResponse(transfer)).thenReturn(expected);
 
         assertThat(service.createStockTransfer("retry-key", original)).isSameAs(expected);
-        assertThat(service.createStockTransfer("retry-key", original)).isSameAs(expected);
+        CreateStockTransferRequest canonicallyEquivalent = request(List.of(
+            line(item.getSku(), "1", UnitOfMeasure.METER)));
+        canonicallyEquivalent.setDescription(" Replenishment ");
+        assertThat(service.createStockTransfer("retry-key", canonicallyEquivalent)).isSameAs(expected);
 
         CreateStockTransferRequest changed = request(List.of(
             line(item.getSku(), "2.0000", UnitOfMeasure.METER)));
