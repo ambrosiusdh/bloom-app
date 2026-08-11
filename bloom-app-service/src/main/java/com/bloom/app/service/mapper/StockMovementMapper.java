@@ -10,10 +10,14 @@ import org.mapstruct.Mapping;
 public interface StockMovementMapper {
     @Mapping(target = "item", source = "product")
     @Mapping(target = "location", source = "stockLocation")
+    @Mapping(target = "referenceNo", source = "displayReference")
+    @Mapping(target = "adjustmentActionType", source = "effectiveAdjustmentActionType")
     StockMovementResponse toResponse(StockMovement stockMovement);
 
     @Mapping(target = "source", source = "sourceType")
     @Mapping(target = "qty", source = "quantity")
     @Mapping(target = "createdDate", source = "createdAt")
+    @Mapping(target = "id", expression = "java(stockMovement.getLegacyAuditLogId() != null "
+        + "? stockMovement.getLegacyAuditLogId() : stockMovement.getId())")
     ItemAuditLogResponse toAuditResponse(StockMovementResponse stockMovement);
 }

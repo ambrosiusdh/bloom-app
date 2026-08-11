@@ -4,7 +4,6 @@ import com.bloom.app.api.dto.request.auditlog.FilterAuditLogRequest;
 import com.bloom.app.api.dto.request.stockmovement.FilterStockMovementRequest;
 import com.bloom.app.api.dto.response.auditlog.ItemAuditLogResponse;
 import com.bloom.app.domain.enums.MovementSourceType;
-import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.service.AuditLogService;
 import com.bloom.app.service.StockMovementQueryService;
 import com.bloom.app.service.mapper.StockMovementMapper;
@@ -17,6 +16,7 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Deprecated(forRemoval = false)
 public class AuditLogServiceImpl implements AuditLogService {
     private final StockMovementQueryService stockMovementQueryService;
     private final StockMovementMapper stockMovementMapper;
@@ -45,11 +45,8 @@ public class AuditLogServiceImpl implements AuditLogService {
                 .endDate(request.getEndDate());
 
         if (request.getActionType() != null) {
-            switch (request.getActionType()) {
-                case ADD -> builder.movementType(MovementType.IN);
-                case REMOVE -> builder.movementType(MovementType.OUT);
-                case CORRECTION -> builder.sourceType(MovementSourceType.STOCK_ADJUSTMENT);
-            }
+            builder.sourceType(MovementSourceType.STOCK_ADJUSTMENT)
+                .adjustmentActionType(request.getActionType());
         }
         return builder.build();
     }

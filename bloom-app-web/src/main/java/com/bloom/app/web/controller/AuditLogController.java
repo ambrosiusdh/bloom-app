@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
+@Deprecated(forRemoval = false)
 public class AuditLogController {
     private final AuditLogService auditLogService;
 

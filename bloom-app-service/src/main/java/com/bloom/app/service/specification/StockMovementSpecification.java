@@ -36,6 +36,10 @@ public final class StockMovementSpecification {
             if (request.getMovementType() != null) {
                 predicates.add(criteriaBuilder.equal(root.get("movementType"), request.getMovementType()));
             }
+            if (request.getAdjustmentActionType() != null) {
+                predicates.add(criteriaBuilder.equal(
+                    root.get("effectiveAdjustmentActionType"), request.getAdjustmentActionType()));
+            }
             if (request.getLocation() != null) {
                 predicates.add(criteriaBuilder.equal(root.get("stockLocation"), request.getLocation()));
             }
@@ -47,7 +51,9 @@ public final class StockMovementSpecification {
             }
             if (hasText(request.getReference())) {
                 predicates.add(criteriaBuilder.like(
-                    criteriaBuilder.lower(root.get("referenceNo")), "%" + normalize(request.getReference()) + "%"));
+                    criteriaBuilder.lower(root.get("displayReference")),
+                    "%" + escapeLike(normalize(request.getReference())) + "%",
+                    '\\'));
             }
 
             return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
@@ -60,5 +66,12 @@ public final class StockMovementSpecification {
 
     private static String normalize(String value) {
         return value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    static String escapeLike(String value) {
+        return value
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_");
     }
 }

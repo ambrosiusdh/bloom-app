@@ -33,6 +33,7 @@ import java.time.Instant;
 @AllArgsConstructor
 @EntityListeners(AuditingEntityListener.class)
 @Table(name = "item_audit_logs")
+@Deprecated(forRemoval = false)
 public class ItemAuditLog {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

@@ -153,6 +153,26 @@ class StockMovementServiceImplTest {
         assertThat(movementCaptor.getValue().getQuantity()).isEqualByComparingTo("3.7500");
         assertThat(movementCaptor.getValue().getQtyBefore()).isEqualByComparingTo("5.0000");
         assertThat(movementCaptor.getValue().getQtyAfter()).isEqualByComparingTo("1.2500");
+        assertThat(movementCaptor.getValue().getAdjustmentActionType())
+            .isEqualTo(StockAdjustmentActionType.CORRECTION);
+    }
+
+    @Test
+    void rejectsMissingOrOversizedReferencesBeforeChangingStock() {
+        Item item = item(true, "1.0000");
+
+        assertThatThrownBy(() -> service.recordMovement(
+            MovementSourceType.SALE, 1L, item, new BigDecimal("0.2500"),
+            MovementType.OUT, " ", StockLocation.STORE))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Movement reference is required");
+        assertThatThrownBy(() -> service.recordMovement(
+            MovementSourceType.SALE, 1L, item, new BigDecimal("0.2500"),
+            MovementType.OUT, "X".repeat(101), StockLocation.STORE))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Movement reference must not exceed 100 characters");
+
+        verifyNoInteractions(itemRepository, stockMovementRepository);
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.bloom.app.api.dto.response.stockmovement.StockMovementResponse;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
+import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
 import com.bloom.app.domain.model.StockMovement;
@@ -45,6 +46,7 @@ class StockMovementMapperTest {
             .build();
         StockMovement movement = StockMovement.builder()
             .id(42L)
+            .legacyAuditLogId(88L)
             .product(item)
             .sourceType(MovementSourceType.GOODS_RECEIPT)
             .sourceId(99L)
@@ -54,6 +56,8 @@ class StockMovementMapperTest {
             .qtyBefore(new BigDecimal("0.5000"))
             .qtyAfter(new BigDecimal("1.7500"))
             .referenceNo("GR-0099")
+            .displayReference("GR-0099")
+            .effectiveAdjustmentActionType(StockAdjustmentActionType.ADD)
             .createdBy("cashier")
             .createdAt(createdAt)
             .build();
@@ -64,7 +68,8 @@ class StockMovementMapperTest {
         assertThat(response.getItem().getSku()).isEqualTo("SKU-7");
         assertThat(response.getLocation()).isEqualTo(StockLocation.WAREHOUSE);
         assertThat(response.getReferenceNo()).isEqualTo("GR-0099");
-        assertThat(legacy.getId()).isEqualTo(42L);
+        assertThat(response.getAdjustmentActionType()).isEqualTo(StockAdjustmentActionType.ADD);
+        assertThat(legacy.getId()).isEqualTo(88L);
         assertThat(legacy.getSource()).isEqualTo(MovementSourceType.GOODS_RECEIPT);
         assertThat(legacy.getQty()).isEqualByComparingTo("1.2500");
         assertThat(legacy.getReferenceNo()).isEqualTo("GR-0099");

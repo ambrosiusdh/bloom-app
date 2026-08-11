@@ -8,6 +8,7 @@ import org.springframework.data.jpa.domain.Specification;
 import java.util.ArrayList;
 import java.util.List;
 
+@Deprecated(forRemoval = false)
 public class ItemAuditLogSpecification {
     public static Specification<ItemAuditLog> filter(FilterAuditLogRequest request) {
         return (root, query, criteriaBuilder) -> {

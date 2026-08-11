@@ -41,6 +41,7 @@ import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.StockMovementQueryService;
 import com.bloom.app.service.StockTransferService;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,6 +62,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -160,7 +162,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsLegacyStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("12");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("14");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
@@ -180,8 +182,57 @@ class PostgreSqlMigrationAndContextTest {
             assertThat(row.get("fractional_quantity_allowed")).isEqualTo(false);
         });
 
+        List<Map<String, Object>> demoStockRows = jdbcTemplate.queryForList("""
+            SELECT
+                item.sku,
+                item.stock_store,
+                item.stock_warehouse,
+                COALESCE(SUM(CASE
+                    WHEN movement.stock_location = 'STORE'
+                        THEN CASE movement.movement_type
+                            WHEN 'IN' THEN movement.quantity
+                            ELSE -movement.quantity
+                        END
+                    ELSE 0
+                END), 0) AS ledger_store,
+                COALESCE(SUM(CASE
+                    WHEN movement.stock_location = 'WAREHOUSE'
+                        THEN CASE movement.movement_type
+                            WHEN 'IN' THEN movement.quantity
+                            ELSE -movement.quantity
+                        END
+                    ELSE 0
+                END), 0) AS ledger_warehouse
+            FROM items item
+            LEFT JOIN stock_movements movement ON movement.product_id = item.id
+            WHERE item.sku LIKE 'DEMO-%'
+            GROUP BY item.id, item.sku, item.stock_store, item.stock_warehouse
+            ORDER BY item.sku
+            """);
+
+        assertThat(demoStockRows).hasSize(6);
+        assertThat(demoStockRows).allSatisfy(row -> {
+            assertThat((BigDecimal) row.get("stock_store"))
+                .isEqualByComparingTo((BigDecimal) row.get("ledger_store"));
+            assertThat((BigDecimal) row.get("stock_warehouse"))
+                .isEqualByComparingTo((BigDecimal) row.get("ledger_warehouse"));
+        });
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM sales WHERE code LIKE 'SALE/DEMO/%'", Long.class))
+            .isEqualTo(4L);
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM goods_receipts WHERE code LIKE 'GR/DEMO/%'", Long.class))
+            .isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM stock_transfers WHERE code LIKE 'ST/DEMO/%'", Long.class))
+            .isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM expenses", Long.class)).isEqualTo(3L);
+
         assertThat(tableExists("item_audit_logs")).isTrue();
+        assertThat(tableExists("stock_movement_legacy_audit_links")).isTrue();
         assertThat(columnExists("stock_movements", "reference_no")).isTrue();
+        assertThat(columnExists("stock_movements", "adjustment_action_type")).isTrue();
         assertThat(columnExists("items", "stock_quantity")).isTrue();
         assertThat(tableExists("suppliers")).isTrue();
         assertThat(tableExists("cash_sessions")).isTrue();
@@ -207,6 +258,8 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(indexExists("uq_stock_movements_transfer_item_location")).isTrue();
         assertThat(indexExists("idx_stock_transfers_history_order")).isTrue();
         assertThat(indexExists("idx_stock_transfer_lines_item_transfer")).isTrue();
+        assertThat(indexExists("idx_stock_movements_history_order")).isTrue();
+        assertThat(indexExists("idx_stock_movements_product_history")).isTrue();
 
         assertThat(numericScale("items", "price")).isEqualTo(4);
         assertThat(numericScale("sales", "subtotal_amount")).isEqualTo(4);
@@ -253,6 +306,74 @@ class PostgreSqlMigrationAndContextTest {
                       CURRENT_TIMESTAMP, 'STORE', 0.0000, 2.0000)
             """))
             .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void v13ReconcilesPreCutoverAuditRowsWithoutMutatingHistoricalMovement() {
+        String schema = "audit_cutover_" + UUID.randomUUID().toString().replace("-", "");
+        if (!schema.startsWith("audit_cutover_")) {
+            throw new IllegalStateException("Unsafe test schema name");
+        }
+        jdbcTemplate.execute("CREATE SCHEMA " + schema);
+        try {
+            Flyway.configure()
+                .dataSource(Objects.requireNonNull(jdbcTemplate.getDataSource()))
+                .locations("classpath:migration")
+                .schemas(schema)
+                .defaultSchema(schema)
+                .target(MigrationVersion.fromVersion("12"))
+                .load()
+                .migrate();
+
+            Long saleId = jdbcTemplate.queryForObject(
+                "INSERT INTO " + schema + ".sales (code, payment_type, created_at) "
+                    + "VALUES ('SALE/PRE-CUTOVER', 'CASH', CURRENT_TIMESTAMP) RETURNING id",
+                Long.class
+            );
+            Long movementId = jdbcTemplate.queryForObject(
+                """
+                INSERT INTO %s.stock_movements (
+                    product_id, movement_type, source_type, source_id,
+                    quantity, created_at, stock_location, qty_before, qty_after
+                ) VALUES (1, 'OUT', 'SALE', ?, 1.0000, CURRENT_TIMESTAMP, 'STORE', 2.0000, 1.0000)
+                RETURNING id
+                """.formatted(schema),
+                Long.class,
+                saleId
+            );
+            Long auditId = jdbcTemplate.queryForObject(
+                """
+                INSERT INTO %s.item_audit_logs (
+                    item_id, qty, qty_before, qty_after, source, reference_no, created_date
+                ) VALUES (1, 1.0000, 2.0000, 1.0000, 'SALE', 'SALE/PRE-CUTOVER', CURRENT_TIMESTAMP)
+                RETURNING id
+                """.formatted(schema),
+                Long.class
+            );
+
+            Flyway.configure()
+                .dataSource(Objects.requireNonNull(jdbcTemplate.getDataSource()))
+                .locations("classpath:migration")
+                .schemas(schema)
+                .defaultSchema(schema)
+                .target(MigrationVersion.LATEST)
+                .load()
+                .migrate();
+
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT item_audit_log_id FROM " + schema
+                    + ".stock_movement_legacy_audit_links WHERE stock_movement_id = ?",
+                Long.class,
+                movementId
+            )).isEqualTo(auditId);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT reference_no FROM " + schema + ".stock_movements WHERE id = ?",
+                String.class,
+                movementId
+            )).isNull();
+        } finally {
+            jdbcTemplate.execute("DROP SCHEMA " + schema + " CASCADE");
+        }
     }
 
     @Test
@@ -324,10 +445,9 @@ class PostgreSqlMigrationAndContextTest {
     void enforcesSingleGlobalOpenCashSessionAndRequiredExpenseSession() {
         assertThat(columnIsNullable("expenses", "cash_session_id")).isFalse();
 
-        jdbcTemplate.update("""
-            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at, version)
-            VALUES (1, 100.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
-            """);
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM cash_sessions WHERE status = 'OPEN'", Long.class))
+            .isEqualTo(1L);
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
             INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at, version)
@@ -337,7 +457,7 @@ class PostgreSqlMigrationAndContextTest {
     }
 
     @Test
-    void rollsBackBalanceAndMovementWhenLedgerReferenceIsTooLong() {
+    void rejectsOversizedLedgerReferenceBeforeChangingBalance() {
         Long itemId = insertInventoryItem("ROLLBACK", new BigDecimal("1.0000"));
         Item item = itemRepository.findById(itemId).orElseThrow();
         Sale sale = Sale.builder()
@@ -351,7 +471,8 @@ class PostgreSqlMigrationAndContextTest {
             .build();
 
         assertThatThrownBy(() -> stockMovementService.recordSaleMovements(sale))
-            .isInstanceOf(DataIntegrityViolationException.class);
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Movement reference must not exceed 100 characters");
 
         assertThat(itemRepository.findById(itemId).orElseThrow().getStockStore())
             .isEqualByComparingTo("1.0000");
@@ -403,9 +524,118 @@ class PostgreSqlMigrationAndContextTest {
             assertThat(movement.getLocation()).isEqualTo(StockLocation.STORE);
         });
         assertThat(statistics.getPrepareStatementCount()).isEqualTo(2L);
+        assertThat(stockMovementQueryService.filterMovements(
+            FilterStockMovementRequest.builder().itemId(itemId).reference("_").build(),
+            PageRequest.of(0, 10)).getContent()).isEmpty();
+        assertThat(stockMovementQueryService.filterMovements(
+            FilterStockMovementRequest.builder().itemId(itemId).reference("%").build(),
+            PageRequest.of(0, 10)).getContent()).isEmpty();
         assertThat(jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM item_audit_logs WHERE item_id IN (?, ?)",
             Long.class, itemId, otherItemId)).isZero();
+    }
+
+    @Test
+    void derivesHistoricalReferenceAndCorrectionActionWithoutMutatingMovement() {
+        Long itemId = insertInventoryItem("HISTORICAL-LEDGER", new BigDecimal("5.0000"));
+        long sharedSourceId = 9_000_000L + itemId;
+        String saleCode = "SALE/HISTORICAL/" + UUID.randomUUID();
+        Long saleId = jdbcTemplate.queryForObject(
+            """
+            INSERT INTO sales (id, code, payment_type, created_at)
+            VALUES (?, ?, 'CASH', ?)
+            RETURNING id
+            """,
+            Long.class,
+            sharedSourceId,
+            saleCode,
+            Timestamp.from(Instant.parse("2026-07-01T10:00:00Z"))
+        );
+        Long historicalMovementId = insertStockMovement(
+            itemId, MovementType.OUT, MovementSourceType.SALE, saleId,
+            StockLocation.STORE, Instant.parse("2026-07-01T10:00:00Z"), null);
+        Long legacyAuditId = jdbcTemplate.queryForObject(
+            """
+            INSERT INTO item_audit_logs (
+                item_id, qty, qty_before, qty_after, source,
+                reference_no, created_by, created_date
+            ) VALUES (?, 1.0000, 2.0000, 1.0000, 'SALE', ?, 'legacy', ?)
+            RETURNING id
+            """,
+            Long.class,
+            itemId,
+            saleCode,
+            Timestamp.from(Instant.parse("2026-07-01T10:00:00Z"))
+        );
+        jdbcTemplate.update(
+            """
+            INSERT INTO stock_movement_legacy_audit_links (stock_movement_id, item_audit_log_id)
+            VALUES (?, ?)
+            """,
+            historicalMovementId,
+            legacyAuditId
+        );
+
+        Page<StockMovementResponse> historicalSale = stockMovementQueryService.filterMovements(
+            FilterStockMovementRequest.builder().itemId(itemId).reference(saleCode).build(),
+            PageRequest.of(0, 10));
+        assertThat(historicalSale.getContent()).singleElement()
+            .satisfies(movement -> {
+                assertThat(movement.getReferenceNo()).isEqualTo(saleCode);
+                assertThat(movement.getLegacyAuditLogId()).isEqualTo(legacyAuditId);
+            });
+
+        String adjustmentCode = "SA/HISTORICAL/" + UUID.randomUUID();
+        Long adjustmentId = jdbcTemplate.queryForObject(
+            """
+            INSERT INTO stock_adjustments (
+                id, stock_adjustment_code, reason, created_by, created_at
+            ) VALUES (?, ?, 'Legacy correction', 'legacy', ?)
+            RETURNING id
+            """,
+            Long.class,
+            sharedSourceId,
+            adjustmentCode,
+            Timestamp.from(Instant.parse("2026-07-02T10:00:00Z"))
+        );
+        jdbcTemplate.update(
+            """
+            INSERT INTO stock_adjustment_items (
+                stock_adjustment_id, item_id, action_type, change_quantity,
+                previous_stock, new_stock, stock_location
+            ) VALUES (?, ?, 'CORRECTION', 1.0000, 2.0000, 1.0000, 'STORE')
+            """,
+            adjustmentId,
+            itemId
+        );
+        Long historicalCorrectionId = insertStockMovement(
+            itemId, MovementType.OUT, MovementSourceType.STOCK_ADJUSTMENT,
+            adjustmentId, StockLocation.STORE, Instant.parse("2026-07-02T10:00:00Z"), null);
+
+        Page<StockMovementResponse> historicalCorrection = stockMovementQueryService.filterMovements(
+            FilterStockMovementRequest.builder()
+                .itemId(itemId)
+                .reference(adjustmentCode)
+                .adjustmentActionType(StockAdjustmentActionType.CORRECTION)
+                .build(),
+            PageRequest.of(0, 10));
+        assertThat(historicalCorrection.getContent()).singleElement().satisfies(movement -> {
+            assertThat(movement.getReferenceNo()).isEqualTo(adjustmentCode);
+            assertThat(movement.getAdjustmentActionType())
+                .isEqualTo(StockAdjustmentActionType.CORRECTION);
+        });
+
+        assertThat(adjustmentId).isEqualTo(saleId);
+        Page<StockMovementResponse> historicalSaleAfterAdjustment =
+            stockMovementQueryService.filterMovements(
+            FilterStockMovementRequest.builder().reference(saleCode).build(),
+            PageRequest.of(0, 10));
+        assertThat(historicalSaleAfterAdjustment.getContent()).singleElement()
+            .satisfies(movement -> assertThat(movement.getAdjustmentActionType()).isNull());
+
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM stock_movements WHERE id IN (?, ?) AND reference_no IS NOT NULL",
+            Long.class, historicalMovementId, historicalCorrectionId)).isZero();
     }
 
     @Test
@@ -938,7 +1168,7 @@ class PostgreSqlMigrationAndContextTest {
         );
     }
 
-    private void insertStockMovement(
+    private Long insertStockMovement(
             Long itemId,
             MovementType movementType,
             MovementSourceType sourceType,
@@ -949,13 +1179,15 @@ class PostgreSqlMigrationAndContextTest {
         BigDecimal before = movementType == MovementType.IN
             ? BigDecimal.ZERO : new BigDecimal("2.0000");
         BigDecimal after = BigDecimal.ONE;
-        jdbcTemplate.update(
+        return jdbcTemplate.queryForObject(
             """
             INSERT INTO stock_movements (
                 product_id, movement_type, source_type, source_id, reference_no,
                 quantity, created_at, created_by, stock_location, qty_before, qty_after
             ) VALUES (?, ?, ?, ?, ?, 1.0000, ?, 'query-test', ?, ?, ?)
+            RETURNING id
             """,
+            Long.class,
             itemId,
             movementType.name(),
             sourceType.name(),

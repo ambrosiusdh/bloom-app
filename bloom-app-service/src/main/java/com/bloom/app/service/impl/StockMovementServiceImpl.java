@@ -3,6 +3,7 @@ package com.bloom.app.service.impl;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
+import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
 import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
@@ -43,6 +44,20 @@ public class StockMovementServiceImpl implements StockMovementService {
         String referenceNo,
         StockLocation stockLocation
     ) {
+        recordMovement(
+            sourceType, sourceId, item, quantity, movementType, referenceNo, stockLocation, null);
+    }
+
+    private void recordMovement(
+        MovementSourceType sourceType,
+        Long sourceId,
+        Item item,
+        BigDecimal quantity,
+        MovementType movementType,
+        String referenceNo,
+        StockLocation stockLocation,
+        StockAdjustmentActionType adjustmentActionType
+    ) {
         if (item == null) {
             throw new IllegalArgumentException("Item is required");
         }
@@ -60,6 +75,12 @@ public class StockMovementServiceImpl implements StockMovementService {
         }
         if (stockLocation == null) {
             throw new IllegalArgumentException("Stock location is required");
+        }
+        if (referenceNo == null || referenceNo.isBlank()) {
+            throw new IllegalArgumentException("Movement reference is required");
+        }
+        if (referenceNo.length() > 100) {
+            throw new IllegalArgumentException("Movement reference must not exceed 100 characters");
         }
         log.debug("Recording movement: item={}, qty={}, type={}, source={}, location={}", item.getSku(), quantity, movementType,
                 sourceType, stockLocation);
@@ -94,6 +115,7 @@ public class StockMovementServiceImpl implements StockMovementService {
                 .sourceType(sourceType)
                 .sourceId(sourceId)
                 .referenceNo(referenceNo)
+                .adjustmentActionType(adjustmentActionType)
                 .quantity(quantity)
                 .stockLocation(stockLocation)
                 .qtyBefore(previousStock)
@@ -163,7 +185,8 @@ public class StockMovementServiceImpl implements StockMovementService {
                     movement.quantity(),
                     movement.movementType(),
                     adjustment.getStockAdjustmentCode(),
-                    item.getStockLocation()
+                    item.getStockLocation(),
+                    item.getActionType()
                 );
             }
         }

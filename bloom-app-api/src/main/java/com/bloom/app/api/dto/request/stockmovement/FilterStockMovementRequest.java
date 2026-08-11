@@ -3,6 +3,7 @@ package com.bloom.app.api.dto.request.stockmovement;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
+import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -19,6 +20,7 @@ public class FilterStockMovementRequest {
     private String itemSku;
     private MovementSourceType sourceType;
     private MovementType movementType;
+    private StockAdjustmentActionType adjustmentActionType;
     private StockLocation location;
     private Instant startDate;
     private Instant endDate;

@@ -11,6 +11,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.time.Instant;
@@ -60,5 +61,18 @@ class StockMovementQueryServiceImplTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("startDate must not be after endDate");
         verifyNoInteractions(repository, mapper);
+    }
+
+    @Test
+    void appendsIdTieBreakerAndRejectsUnknownSortProperties() {
+        Sort stable = StockMovementQueryServiceImpl.stableSort(
+            Sort.by(Sort.Order.asc("createdAt")));
+
+        assertThat(stable.stream().map(Sort.Order::getProperty))
+            .containsExactly("createdAt", "id");
+        assertThat(stable.getOrderFor("id").isDescending()).isTrue();
+        assertThatThrownBy(() -> StockMovementQueryServiceImpl.stableSort(Sort.by("product.category")))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Unsupported stock movement sort property: product.category");
     }
 }

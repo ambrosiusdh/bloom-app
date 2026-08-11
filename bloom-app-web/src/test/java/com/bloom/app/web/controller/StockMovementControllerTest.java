@@ -5,6 +5,7 @@ import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.service.StockMovementQueryService;
+import com.bloom.app.api.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.PageImpl;
@@ -21,6 +22,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -34,6 +36,7 @@ class StockMovementControllerTest {
         service = mock(StockMovementQueryService.class);
         mockMvc = MockMvcBuilders
             .standaloneSetup(new StockMovementController(service))
+            .setControllerAdvice(new GlobalExceptionHandler())
             .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
             .build();
     }
@@ -77,5 +80,18 @@ class StockMovementControllerTest {
                 && filter.getReference().equals("sale-42")),
             argThat(pageable -> pageable.getPageNumber() == 1 && pageable.getPageSize() == 5)
         );
+    }
+
+    @Test
+    void returnsBadRequestForAnInvertedDateRange() throws Exception {
+        doThrow(new IllegalArgumentException("startDate must not be after endDate"))
+            .when(service).filterMovements(any(), any());
+
+        mockMvc.perform(get("/api/stock-movements")
+                .param("startDate", "2026-09-01T00:00:00Z")
+                .param("endDate", "2026-08-01T00:00:00Z"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.message").value("startDate must not be after endDate"));
     }
 }

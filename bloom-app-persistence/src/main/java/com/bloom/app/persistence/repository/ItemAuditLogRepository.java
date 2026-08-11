@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
 @Repository
+@Deprecated(forRemoval = false)
 public interface ItemAuditLogRepository
         extends JpaRepository<ItemAuditLog, Long>, JpaSpecificationExecutor<ItemAuditLog> {
     @EntityGraph(attributePaths = "item")
