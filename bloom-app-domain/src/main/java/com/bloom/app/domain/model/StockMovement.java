@@ -49,6 +49,9 @@ public class StockMovement {
     @Column(name = "source_id", nullable = false)
     private Long sourceId;
 
+    @Column(name = "reference_no", length = 100)
+    private String referenceNo;
+
     @Column(name = "quantity", nullable = false, precision = 19, scale = 4)
     private BigDecimal quantity;
 

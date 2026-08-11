@@ -9,7 +9,6 @@ import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.model.*;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
-import com.bloom.app.persistence.repository.ItemAuditLogRepository;
 import com.bloom.app.service.StockMovementService;
 import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import lombok.RequiredArgsConstructor;
@@ -29,11 +28,10 @@ public class StockMovementServiceImpl implements StockMovementService {
 
     private final StockMovementRepository stockMovementRepository;
     private final ItemRepository itemRepository;
-    private final ItemAuditLogRepository itemAuditLogRepository;
 
     /**
      * Generic method to record a stock movement.
-     * Updates the Item stock quantity and logs to ItemAuditLog.
+     * Updates the item balance and records the authoritative StockMovement ledger entry.
      */
     @Transactional
     public void recordMovement(
@@ -95,22 +93,13 @@ public class StockMovementServiceImpl implements StockMovementService {
                 .movementType(movementType)
                 .sourceType(sourceType)
                 .sourceId(sourceId)
+                .referenceNo(referenceNo)
                 .quantity(quantity)
                 .stockLocation(stockLocation)
                 .qtyBefore(previousStock)
                 .qtyAfter(newStock)
                 .build();
         stockMovementRepository.saveAndFlush(movement);
-
-        ItemAuditLog auditLog = ItemAuditLog.builder()
-                .item(persistedItem)
-                .qty(quantity)
-                .qtyBefore(previousStock)
-                .qtyAfter(newStock)
-                .source(sourceType)
-                .referenceNo(referenceNo)
-                .build();
-        itemAuditLogRepository.saveAndFlush(auditLog);
     }
 
     // Helper to record sales
