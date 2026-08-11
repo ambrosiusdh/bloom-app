@@ -3,8 +3,10 @@ package com.bloom.app.api.exception;
 import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
 import com.bloom.app.domain.exception.InsufficientStockException;
+import com.bloom.app.domain.exception.IdempotencyConflictException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
+import jakarta.validation.ConstraintViolationException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -91,9 +93,18 @@ public class GlobalExceptionHandler {
         return domainError(ex, HttpStatus.BAD_REQUEST);
     }
 
-    @ExceptionHandler({StockConcurrencyException.class, BaseUnitOfMeasureImmutableException.class})
+    @ExceptionHandler({
+        StockConcurrencyException.class,
+        BaseUnitOfMeasureImmutableException.class,
+        IdempotencyConflictException.class
+    })
     public ResponseEntity<?> handleInventoryConflict(RuntimeException ex) {
         return domainError(ex, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<?> handleConstraintViolation(ConstraintViolationException ex) {
+        return domainError(ex, HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(OptimisticLockingFailureException.class)
