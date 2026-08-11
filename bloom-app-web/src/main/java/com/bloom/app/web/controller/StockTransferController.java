@@ -1,8 +1,11 @@
 package com.bloom.app.web.controller;
 
 import com.bloom.app.api.dto.request.stocktransfer.CreateStockTransferRequest;
+import com.bloom.app.api.dto.request.stocktransfer.FilterStockTransferRequest;
 import com.bloom.app.api.dto.response.ApiResponse;
 import com.bloom.app.api.dto.response.stocktransfer.StockTransferResponse;
+import com.bloom.app.api.dto.response.stocktransfer.StockTransferSummaryResponse;
+import com.bloom.app.api.helper.PagingHelper;
 import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.service.StockTransferService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -11,6 +14,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,6 +46,16 @@ public class StockTransferController {
     ) {
         StockTransferResponse response = stockTransferService.createStockTransfer(requestKey, request);
         return ResponseHelper.created("Stock transfer created successfully", response);
+    }
+
+    @GetMapping
+    @Operation(summary = "List Stock Transfers")
+    public ResponseEntity<ApiResponse<Page<StockTransferSummaryResponse>>> listStockTransfers(
+        @Valid FilterStockTransferRequest request,
+        Pageable pageable
+    ) {
+        return ResponseHelper.ok(stockTransferService.listStockTransfers(
+            request, PagingHelper.toPageRequest(pageable)));
     }
 
     @GetMapping("/details")

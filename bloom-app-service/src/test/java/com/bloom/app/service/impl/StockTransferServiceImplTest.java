@@ -1,8 +1,10 @@
 package com.bloom.app.service.impl;
 
 import com.bloom.app.api.dto.request.stocktransfer.CreateStockTransferRequest;
+import com.bloom.app.api.dto.request.stocktransfer.FilterStockTransferRequest;
 import com.bloom.app.api.dto.request.stocktransfer.StockTransferLineRequest;
 import com.bloom.app.api.dto.response.stocktransfer.StockTransferResponse;
+import com.bloom.app.api.dto.response.stocktransfer.StockTransferSummaryResponse;
 import com.bloom.app.domain.enums.DocumentType;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
@@ -11,6 +13,7 @@ import com.bloom.app.domain.exception.IdempotencyConflictException;
 import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.StockTransfer;
+import com.bloom.app.domain.model.StockTransferLine;
 import com.bloom.app.domain.model.UnitOfMeasure;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.StockTransferRepository;
@@ -19,14 +22,21 @@ import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.mapper.StockTransferMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -76,9 +86,11 @@ class StockTransferServiceImplTest {
         assertThat(result).isSameAs(expected);
         assertThat(transfer.getLines()).extracting(line -> line.getItem().getId())
             .containsExactly(10L, 20L);
-        assertThat(transfer.getLines()).extracting(line -> line.getItemSku())
+        assertThat(transfer.getLines()).extracting(StockTransferLine::getItemSku)
             .containsExactly("ITEM-10", "ITEM-20");
-        assertThat(transfer.getLines()).extracting(line -> line.getUnitOfMeasure())
+        assertThat(transfer.getLines()).extracting(StockTransferLine::getItemName)
+            .containsExactly("Name ITEM-10", "Name ITEM-20");
+        assertThat(transfer.getLines()).extracting(StockTransferLine::getUnitOfMeasure)
             .containsOnly(UnitOfMeasure.METER);
         verify(stockTransferRepository).lockRequestKey("request-1");
         InOrder movementOrder = inOrder(stockMovementService);
@@ -181,6 +193,63 @@ class StockTransferServiceImplTest {
         verifyNoInteractions(stockMovementService);
     }
 
+    @Test
+    void listsSummariesWithDeterministicNewestFirstOrdering() {
+        FilterStockTransferRequest request = FilterStockTransferRequest.builder()
+            .itemId(10L)
+            .sourceLocation(StockLocation.STORE)
+            .build();
+        StockTransfer transfer = StockTransfer.builder().id(77L).lineCount(2).build();
+        StockTransferSummaryResponse summary = StockTransferSummaryResponse.builder()
+            .id(77L).lineCount(2).build();
+        when(stockTransferRepository.findAll(
+                any(Specification.class), any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(transfer), PageRequest.of(1, 5), 6));
+        when(stockTransferMapper.toSummaryResponse(transfer)).thenReturn(summary);
+
+        var result = service.listStockTransfers(request, PageRequest.of(1, 5));
+
+        assertThat(result.getContent()).containsExactly(summary);
+        assertThat(result.getTotalElements()).isEqualTo(6);
+        Sort expectedSort = Sort.by(
+            Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+        verify(stockTransferRepository).findAll(
+            any(Specification.class),
+            argThat((Pageable pageable) -> pageable.getPageNumber() == 1
+                && pageable.getPageSize() == 5
+                && pageable.getSort().equals(expectedSort))
+        );
+    }
+
+    @Test
+    void rejectsInvalidHistoryRangeBeforeQuerying() {
+        FilterStockTransferRequest request = FilterStockTransferRequest.builder()
+            .createdFrom(Instant.parse("2026-08-12T00:00:00Z"))
+            .createdTo(Instant.parse("2026-08-11T00:00:00Z"))
+            .build();
+
+        assertThatThrownBy(() -> service.listStockTransfers(request, PageRequest.of(0, 10)))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Created-from must not be after created-to");
+
+        verify(stockTransferRepository, never()).findAll(
+            any(Specification.class), any(Pageable.class));
+    }
+
+    @Test
+    void retrievesDetailsByCanonicalCodeAndReportsMissingTransfer() {
+        StockTransfer transfer = StockTransfer.builder().id(77L).build();
+        StockTransferResponse expected = StockTransferResponse.builder().id(77L).build();
+        when(stockTransferRepository.findByCode("TRF-00077")).thenReturn(Optional.of(transfer));
+        when(stockTransferRepository.findByCode("TRF-00088")).thenReturn(Optional.empty());
+        when(stockTransferMapper.toResponse(transfer)).thenReturn(expected);
+
+        assertThat(service.getStockTransferDetails("TRF-00077")).isSameAs(expected);
+        assertThatThrownBy(() -> service.getStockTransferDetails("TRF-00088"))
+            .isInstanceOf(com.bloom.app.domain.exception.ResourceNotFoundException.class)
+            .hasMessage("Stock transfer not found: TRF-00088");
+    }
+
     private CreateStockTransferRequest request(List<StockTransferLineRequest> lines) {
         return CreateStockTransferRequest.builder()
             .sourceLocation(StockLocation.STORE)
@@ -204,6 +273,7 @@ class StockTransferServiceImplTest {
         return Item.builder()
             .id(id)
             .sku(sku)
+            .name("Name " + sku)
             .baseUnitOfMeasure(UnitOfMeasure.METER)
             .fractionalQuantityAllowed(fractionalQuantityAllowed)
             .stockStore(new BigDecimal(storeStock))

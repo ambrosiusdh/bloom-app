@@ -22,6 +22,7 @@ import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import org.hibernate.annotations.Immutable;
+import org.hibernate.annotations.Formula;
 
 import java.time.Instant;
 import java.util.List;
@@ -67,6 +68,9 @@ public class StockTransfer {
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    @Formula("(SELECT COUNT(*) FROM stock_transfer_lines line WHERE line.stock_transfer_id = id)")
+    private long lineCount;
 
     @OneToMany(mappedBy = "stockTransfer", cascade = CascadeType.PERSIST)
     @OrderBy("id ASC")

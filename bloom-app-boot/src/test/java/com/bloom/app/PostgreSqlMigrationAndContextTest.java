@@ -5,10 +5,12 @@ import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
 import com.bloom.app.api.dto.request.stockadjustment.CreateStockAdjustmentRequest;
 import com.bloom.app.api.dto.request.stockadjustment.StockAdjustmentItemRequest;
 import com.bloom.app.api.dto.request.stocktransfer.CreateStockTransferRequest;
+import com.bloom.app.api.dto.request.stocktransfer.FilterStockTransferRequest;
 import com.bloom.app.api.dto.request.stocktransfer.StockTransferLineRequest;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
 import com.bloom.app.api.dto.response.stocktransfer.StockTransferResponse;
+import com.bloom.app.api.dto.response.stocktransfer.StockTransferSummaryResponse;
 import com.bloom.app.domain.enums.DocumentType;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
@@ -17,6 +19,7 @@ import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.exception.IdempotencyConflictException;
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.DocumentCounter;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Sale;
@@ -46,12 +49,16 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -140,7 +147,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsLegacyStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("10");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("11");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
@@ -184,6 +191,8 @@ class PostgreSqlMigrationAndContextTest {
         )).isTrue();
         assertThat(indexExists("uq_stock_movements_sale_item_location")).isTrue();
         assertThat(indexExists("uq_stock_movements_transfer_item_location")).isTrue();
+        assertThat(indexExists("idx_stock_transfers_history_order")).isTrue();
+        assertThat(indexExists("idx_stock_transfer_lines_item_transfer")).isTrue();
 
         assertThat(numericScale("items", "price")).isEqualTo(4);
         assertThat(numericScale("sales", "subtotal_amount")).isEqualTo(4);
@@ -214,6 +223,7 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(numericScale("item_audit_logs", "qty_after")).isEqualTo(4);
         assertThat(numericScale("stock_transfer_lines", "quantity")).isEqualTo(4);
         assertThat(columnExists("stock_transfer_lines", "item_sku")).isTrue();
+        assertThat(columnExists("stock_transfer_lines", "item_name")).isTrue();
         assertThat(columnExists("stock_transfer_lines", "unit_of_measure")).isTrue();
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
@@ -484,6 +494,8 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(created.getLines()).hasSize(2);
         assertThat(created.getLines()).extracting(line -> line.getItemSku())
             .containsExactly(firstItem.getSku(), secondItem.getSku());
+        assertThat(created.getLines()).extracting(line -> line.getItemName())
+            .containsExactly(firstItem.getName(), secondItem.getName());
         assertThat(created.getLines()).extracting(line -> line.getUnitOfMeasure())
             .containsOnly(UnitOfMeasure.PIECE);
         assertThat(saved.getLines()).extracting(line -> line.getQuantity())
@@ -656,6 +668,109 @@ class PostgreSqlMigrationAndContextTest {
         });
     }
 
+    @Test
+    @Transactional
+    void discoversTransferHistoryWithDeterministicPaginationAndEveryFilter() {
+        String unique = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        Long firstItemId = insertInventoryItem("HISTORY-FIRST-" + unique, new BigDecimal("5.0000"));
+        Long secondItemId = insertInventoryItem("HISTORY-SECOND-" + unique, new BigDecimal("5.0000"));
+        Instant tiedAt = Instant.parse("2099-01-01T10:00:00Z");
+        Instant newestAt = Instant.parse("2099-01-02T10:00:00Z");
+        String firstCode = "ST/HISTORY/" + unique + "/A";
+        String secondCode = "ST/HISTORY/" + unique + "/B";
+        String newestCode = "ST/HISTORY/" + unique + "/C";
+
+        Long firstId = insertHistoryTransfer(
+            firstCode, StockLocation.STORE, StockLocation.WAREHOUSE,
+            "Two lines", "history-user-a", tiedAt, firstItemId, secondItemId);
+        Long secondId = insertHistoryTransfer(
+            secondCode, StockLocation.WAREHOUSE, StockLocation.STORE,
+            "Same timestamp", "history-user-b", tiedAt, firstItemId);
+        Long newestId = insertHistoryTransfer(
+            newestCode, StockLocation.STORE, StockLocation.WAREHOUSE,
+            "Newest", "history-user-c", newestAt, secondItemId);
+
+        FilterStockTransferRequest historyWindow = FilterStockTransferRequest.builder()
+            .createdFrom(Instant.parse("2099-01-01T00:00:00Z"))
+            .createdTo(Instant.parse("2099-01-03T00:00:00Z"))
+            .build();
+        Page<StockTransferSummaryResponse> ordered = stockTransferService.listStockTransfers(
+            historyWindow, PageRequest.of(0, 3));
+        assertThat(ordered.getContent()).extracting(StockTransferSummaryResponse::getId)
+            .containsExactly(newestId, secondId, firstId);
+        assertThat(ordered.getContent()).extracting(StockTransferSummaryResponse::getLineCount)
+            .containsExactly(1L, 1L, 2L);
+
+        Page<StockTransferSummaryResponse> firstItemFirstPage = stockTransferService.listStockTransfers(
+            FilterStockTransferRequest.builder()
+                .itemId(firstItemId)
+                .createdFrom(historyWindow.getCreatedFrom())
+                .createdTo(historyWindow.getCreatedTo())
+                .build(),
+            PageRequest.of(0, 1)
+        );
+        assertThat(firstItemFirstPage.getTotalElements()).isEqualTo(2);
+        assertThat(firstItemFirstPage.getTotalPages()).isEqualTo(2);
+        assertThat(firstItemFirstPage.getContent()).extracting(StockTransferSummaryResponse::getId)
+            .containsExactly(secondId);
+        assertThat(stockTransferService.listStockTransfers(
+            FilterStockTransferRequest.builder()
+                .itemId(firstItemId)
+                .createdFrom(historyWindow.getCreatedFrom())
+                .createdTo(historyWindow.getCreatedTo())
+                .build(),
+            PageRequest.of(1, 1)
+        ).getContent()).extracting(StockTransferSummaryResponse::getId)
+            .containsExactly(firstId);
+
+        assertThat(stockTransferService.listStockTransfers(
+            FilterStockTransferRequest.builder()
+                .code(" st / history / " + unique.toLowerCase() + " / a ")
+                .build(), PageRequest.of(0, 10)).getContent())
+            .extracting(StockTransferSummaryResponse::getId)
+            .containsExactly(firstId);
+        assertThat(stockTransferService.listStockTransfers(
+            FilterStockTransferRequest.builder()
+                .sourceLocation(StockLocation.WAREHOUSE)
+                .createdFrom(historyWindow.getCreatedFrom())
+                .createdTo(historyWindow.getCreatedTo())
+                .build(), PageRequest.of(0, 10)).getContent())
+            .extracting(StockTransferSummaryResponse::getId)
+            .containsExactly(secondId);
+        assertThat(stockTransferService.listStockTransfers(
+            FilterStockTransferRequest.builder()
+                .destinationLocation(StockLocation.WAREHOUSE)
+                .createdFrom(historyWindow.getCreatedFrom())
+                .createdTo(historyWindow.getCreatedTo())
+                .build(), PageRequest.of(0, 10)).getContent())
+            .extracting(StockTransferSummaryResponse::getId)
+            .containsExactly(newestId, firstId);
+        assertThat(stockTransferService.listStockTransfers(
+            FilterStockTransferRequest.builder().createdFrom(newestAt).build(),
+            PageRequest.of(0, 10)).getContent())
+            .extracting(StockTransferSummaryResponse::getId)
+            .containsExactly(newestId);
+        assertThat(stockTransferService.listStockTransfers(
+            FilterStockTransferRequest.builder()
+                .createdFrom(historyWindow.getCreatedFrom()).createdTo(tiedAt).build(),
+            PageRequest.of(0, 10)).getContent())
+            .extracting(StockTransferSummaryResponse::getId)
+            .containsExactly(secondId, firstId);
+
+        StockTransferResponse detail = stockTransferService.getStockTransferDetails(firstCode);
+        assertThat(detail.getCode()).isEqualTo(firstCode);
+        assertThat(detail.getCreatedBy()).isEqualTo("history-user-a");
+        assertThat(detail.getLines()).hasSize(2);
+        String snapshottedName = detail.getLines().getFirst().getItemName();
+        jdbcTemplate.update("UPDATE items SET name = ? WHERE id = ?", "Changed later", firstItemId);
+        assertThat(stockTransferService.getStockTransferDetails(firstCode).getLines())
+            .extracting(line -> line.getItemName())
+            .contains(snapshottedName);
+        assertThatThrownBy(() -> stockTransferService.getStockTransferDetails("TRF-NOT-FOUND"))
+            .isInstanceOf(ResourceNotFoundException.class)
+            .hasMessage("Stock transfer not found: TRF-NOT-FOUND");
+    }
+
     private boolean tableExists(String tableName) {
         Boolean exists = jdbcTemplate.queryForObject(
             """
@@ -764,6 +879,52 @@ class PostgreSqlMigrationAndContextTest {
             storeStock,
             storeStock
         );
+    }
+
+    private Long insertHistoryTransfer(
+            String code,
+            StockLocation sourceLocation,
+            StockLocation destinationLocation,
+            String description,
+            String createdBy,
+            Instant createdAt,
+            Long... itemIds) {
+        Long transferId = jdbcTemplate.queryForObject(
+            """
+            INSERT INTO stock_transfers (
+                code, request_key, request_hash, source_location,
+                destination_location, description, created_by, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+            """,
+            Long.class,
+            code,
+            "history-" + UUID.randomUUID(),
+            "a".repeat(64),
+            sourceLocation.name(),
+            destinationLocation.name(),
+            description,
+            createdBy,
+            Timestamp.from(createdAt)
+        );
+        for (Long itemId : itemIds) {
+            Map<String, Object> item = jdbcTemplate.queryForMap(
+                "SELECT sku, name, base_unit_of_measure FROM items WHERE id = ?", itemId);
+            jdbcTemplate.update(
+                """
+                INSERT INTO stock_transfer_lines (
+                    stock_transfer_id, item_id, item_sku, item_name,
+                    unit_of_measure, quantity
+                ) VALUES (?, ?, ?, ?, ?, 1.0000)
+                """,
+                transferId,
+                itemId,
+                item.get("sku"),
+                item.get("name"),
+                item.get("base_unit_of_measure")
+            );
+        }
+        return transferId;
     }
 
     private Sale concurrentSale(long saleId, Item item) {

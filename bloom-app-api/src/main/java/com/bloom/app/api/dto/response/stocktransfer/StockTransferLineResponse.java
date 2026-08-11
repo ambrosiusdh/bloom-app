@@ -16,6 +16,7 @@ public class StockTransferLineResponse {
     private Long id;
     private Long itemId;
     private String itemSku;
+    private String itemName;
     private BigDecimal quantity;
     private UnitOfMeasure unitOfMeasure;
 }

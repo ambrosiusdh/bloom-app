@@ -51,6 +51,9 @@ public class StockTransferLine {
     @Column(name = "item_sku", nullable = false, updatable = false)
     private String itemSku;
 
+    @Column(name = "item_name", nullable = false, updatable = false)
+    private String itemName;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "unit_of_measure", nullable = false, length = 30, updatable = false)
     private UnitOfMeasure unitOfMeasure;

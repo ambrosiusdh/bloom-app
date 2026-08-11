@@ -1,8 +1,10 @@
 package com.bloom.app.service.impl;
 
 import com.bloom.app.api.dto.request.stocktransfer.CreateStockTransferRequest;
+import com.bloom.app.api.dto.request.stocktransfer.FilterStockTransferRequest;
 import com.bloom.app.api.dto.request.stocktransfer.StockTransferLineRequest;
 import com.bloom.app.api.dto.response.stocktransfer.StockTransferResponse;
+import com.bloom.app.api.dto.response.stocktransfer.StockTransferSummaryResponse;
 import com.bloom.app.domain.enums.DocumentType;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
@@ -20,10 +22,15 @@ import com.bloom.app.service.DocumentCounterService;
 import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.StockTransferService;
 import com.bloom.app.service.mapper.StockTransferMapper;
+import com.bloom.app.service.specification.StockTransferSpecification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
@@ -108,6 +115,7 @@ public class StockTransferServiceImpl implements StockTransferService {
                 .stockTransfer(transfer)
                 .item(line.item())
                 .itemSku(line.item().getSku())
+                .itemName(itemDisplayName(line.item()))
                 .unitOfMeasure(line.item().getBaseUnitOfMeasure())
                 .quantity(normalizeStoredQuantity(line.quantity()))
                 .build())
@@ -151,6 +159,34 @@ public class StockTransferServiceImpl implements StockTransferService {
         StockTransfer transfer = stockTransferRepository.findByCode(code)
             .orElseThrow(() -> new ResourceNotFoundException("Stock transfer not found: " + code));
         return stockTransferMapper.toResponse(transfer);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<StockTransferSummaryResponse> listStockTransfers(
+            FilterStockTransferRequest request, Pageable pageable) {
+        FilterStockTransferRequest effectiveRequest = request == null
+            ? new FilterStockTransferRequest() : request;
+        if (effectiveRequest.getItemId() != null && effectiveRequest.getItemId() <= 0) {
+            throw new IllegalArgumentException("Item ID must be positive");
+        }
+        if (effectiveRequest.getCreatedFrom() != null
+                && effectiveRequest.getCreatedTo() != null
+                && effectiveRequest.getCreatedFrom().isAfter(effectiveRequest.getCreatedTo())) {
+            throw new IllegalArgumentException("Created-from must not be after created-to");
+        }
+
+        Pageable effectivePageable = PageRequest.of(
+            pageable.getPageNumber(),
+            pageable.getPageSize(),
+            Sort.by(
+                Sort.Order.desc("createdAt"),
+                Sort.Order.desc("id")
+            )
+        );
+        return stockTransferRepository
+            .findAll(StockTransferSpecification.filter(effectiveRequest), effectivePageable)
+            .map(stockTransferMapper::toSummaryResponse);
     }
 
     private void validateRequestShape(CreateStockTransferRequest request) {
@@ -272,6 +308,11 @@ public class StockTransferServiceImpl implements StockTransferService {
     private String canonicalDescription(String description) {
         String normalized = normalizeDescription(description);
         return normalized == null ? "" : normalized;
+    }
+
+    private String itemDisplayName(Item item) {
+        return item.getName() == null || item.getName().isBlank()
+            ? item.getSku() : item.getName().trim();
     }
 
     private record PreparedLine(Item item, BigDecimal quantity) {
