@@ -10,21 +10,38 @@ import com.bloom.app.service.mapper.StockMovementMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+
+import java.util.Map;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 @Deprecated(forRemoval = false)
 public class AuditLogServiceImpl implements AuditLogService {
+    private static final Map<String, String> LEGACY_SORT_PROPERTIES = Map.ofEntries(
+        Map.entry("id", "id"),
+        Map.entry("item", "itemId"),
+        Map.entry("qty", "quantity"),
+        Map.entry("qtyBefore", "qtyBefore"),
+        Map.entry("qtyAfter", "qtyAfter"),
+        Map.entry("source", "sourceType"),
+        Map.entry("referenceNo", "referenceNo"),
+        Map.entry("createdBy", "createdBy"),
+        Map.entry("createdDate", "createdAt")
+    );
+
     private final StockMovementQueryService stockMovementQueryService;
     private final StockMovementMapper stockMovementMapper;
 
     @Override
     public Page<ItemAuditLogResponse> filterAuditLogs(FilterAuditLogRequest request, Pageable pageable) {
         log.debug("AuditLogService filterAuditLogs with request: {}", request);
-        return stockMovementQueryService.filterMovements(toStockMovementFilter(request), pageable)
+        return stockMovementQueryService.filterMovements(
+                toStockMovementFilter(request), toStockMovementPageable(pageable))
             .map(stockMovementMapper::toAuditResponse);
     }
 
@@ -32,7 +49,8 @@ public class AuditLogServiceImpl implements AuditLogService {
     public Page<ItemAuditLogResponse> getItemAuditLogs(String sku, Pageable pageable) {
         log.debug("AuditLogService getItemAuditLogs with sku: {}", sku);
         return stockMovementQueryService.filterMovements(
-                FilterStockMovementRequest.builder().itemSku(sku).build(), pageable)
+                FilterStockMovementRequest.builder().itemSku(sku).build(),
+                toStockMovementPageable(pageable))
             .map(stockMovementMapper::toAuditResponse);
     }
 
@@ -49,5 +67,15 @@ public class AuditLogServiceImpl implements AuditLogService {
                 .adjustmentActionType(request.getActionType());
         }
         return builder.build();
+    }
+
+    private Pageable toStockMovementPageable(Pageable pageable) {
+        Sort translated = Sort.unsorted();
+        for (Sort.Order order : pageable.getSort()) {
+            String property = LEGACY_SORT_PROPERTIES.getOrDefault(
+                order.getProperty(), order.getProperty());
+            translated = translated.and(Sort.by(order.withProperty(property)));
+        }
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), translated);
     }
 }

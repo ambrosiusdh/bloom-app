@@ -17,5 +17,6 @@ public class FilterAuditLogRequest {
     private StockAdjustmentActionType actionType;
     private String referenceNo;
     private Instant startDate;
+    /** Exact inclusive instant; calendar-day clients must supply their intended boundary. */
     private Instant endDate;
 }

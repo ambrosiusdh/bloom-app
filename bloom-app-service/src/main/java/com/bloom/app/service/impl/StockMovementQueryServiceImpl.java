@@ -74,6 +74,10 @@ public class StockMovementQueryServiceImpl implements StockMovementQueryService 
         properties.put("adjustmentActionType", "effectiveAdjustmentActionType");
         properties.put("location", "stockLocation");
         properties.put("quantity", "quantity");
+        properties.put("qtyBefore", "qtyBefore");
+        properties.put("qtyAfter", "qtyAfter");
+        properties.put("createdBy", "createdBy");
+        properties.put("itemId", "product.id");
         properties.put("referenceNo", "displayReference");
         return Map.copyOf(properties);
     }

@@ -7,11 +7,14 @@ import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.service.StockMovementQueryService;
 import com.bloom.app.service.mapper.StockMovementMapper;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.util.List;
 
@@ -51,5 +54,33 @@ class AuditLogServiceImplTest {
         assertThat(captor.getValue().getSourceType()).isEqualTo(MovementSourceType.STOCK_ADJUSTMENT);
         assertThat(captor.getValue().getAdjustmentActionType())
             .isEqualTo(actionType);
+    }
+
+    @Test
+    void translatesEveryLegacyAuditSortProperty() {
+        when(queryService.filterMovements(any(), any()))
+            .thenReturn(new PageImpl<>(List.of()));
+        Pageable legacyPageable = PageRequest.of(2, 15, Sort.by(
+            Sort.Order.desc("createdDate"),
+            Sort.Order.asc("qty"),
+            Sort.Order.asc("source"),
+            Sort.Order.desc("referenceNo"),
+            Sort.Order.asc("qtyBefore"),
+            Sort.Order.desc("qtyAfter"),
+            Sort.Order.asc("createdBy"),
+            Sort.Order.asc("item")
+        ));
+
+        service.filterAuditLogs(new FilterAuditLogRequest(), legacyPageable);
+
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        verify(queryService).filterMovements(any(), pageableCaptor.capture());
+        assertThat(pageableCaptor.getValue().getPageNumber()).isEqualTo(2);
+        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(15);
+        assertThat(pageableCaptor.getValue().getSort())
+            .extracting(Sort.Order::getProperty)
+            .containsExactly(
+                "createdAt", "quantity", "sourceType", "referenceNo",
+                "qtyBefore", "qtyAfter", "createdBy", "itemId");
     }
 }

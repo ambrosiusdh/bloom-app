@@ -1,15 +1,15 @@
 package com.bloom.app.web.controller;
 
-import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.api.dto.UserSessionData;
 import com.bloom.app.api.dto.request.auth.LoginAuthRequest;
 import com.bloom.app.api.dto.response.ApiResponse;
+import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.domain.model.User;
 import com.bloom.app.service.UserService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,9 +20,9 @@ import org.springframework.web.bind.annotation.RestController;
 @Slf4j
 @RestController
 @RequestMapping("/api/auth")
+@RequiredArgsConstructor
 public class AuthController {
-    @Autowired
-    private UserService userService;
+    private final UserService userService;
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<Boolean>> login(

@@ -5,13 +5,25 @@
 
 ## Migration safeguards
 
-Flyway V13 creates an immutable link between every historical `StockMovement` and `ItemAuditLog` row. The migration
-fails when historical coverage is not one-to-one or when a legacy human-readable reference cannot be reconstructed
-from the authoritative source record. It does not update either historical table.
+Flyway V13 creates an immutable link between every historical `StockMovement` and `ItemAuditLog` row. It fails when
+historical coverage is not one-to-one or when a legacy human-readable reference cannot be reconstructed. V14 then
+reconciles the captured pre-cutover sets again with the reference included in candidate identity, fails missing or
+ambiguous matches, and snapshots the verified reference and adjustment action on the compatibility link. Neither
+migration updates either historical ledger.
 
-Historical references are derived at read time from the source document (`Sale`, `StockAdjustment`, `GoodsReceipt`,
-`StockTransfer`, or the opening-balance item). Historical adjustment actions are derived from the referenced
-`StockAdjustmentItem`. Legacy audit responses use the linked `ItemAuditLog.id`; new records use `StockMovement.id`.
+Historical reads use the V14 compatibility snapshots, so later SKU or source-record changes cannot rewrite displayed
+history. Adjustment actions are matched by source, item, location, balances, magnitude, and direction before being
+snapshotted. Legacy audit responses use the linked `ItemAuditLog.id`; new records use `StockMovement.id`.
+
+## Local demo data
+
+Demo data is not a Flyway migration. Run `scripts/dev/seed-release-1-demo.sql` manually only against a development
+database after V14. The script is transactional, rejects retries, and gives `kasir.demo` a password hash independent
+from `admin`.
+
+If the former demo V14 already ran locally, stop the application and run
+`scripts/dev/reset-flyway-to-v13.sql` once. It verifies the deleted demo migration is the latest entry, removes only
+that Flyway history row, and retains all seeded business data; the next application start applies the new V14.
 
 ## Deployment and rollback constraint
 

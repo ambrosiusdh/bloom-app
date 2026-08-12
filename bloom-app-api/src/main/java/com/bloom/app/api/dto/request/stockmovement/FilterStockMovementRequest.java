@@ -23,6 +23,7 @@ public class FilterStockMovementRequest {
     private StockAdjustmentActionType adjustmentActionType;
     private StockLocation location;
     private Instant startDate;
+    /** Exact inclusive instant; calendar-day clients must supply their intended boundary. */
     private Instant endDate;
     private String reference;
 }

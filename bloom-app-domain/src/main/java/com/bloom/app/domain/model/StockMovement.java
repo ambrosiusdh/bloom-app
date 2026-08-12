@@ -55,23 +55,13 @@ public class StockMovement {
     private String referenceNo;
 
     /**
-     * Reference exposed by read APIs. Historical rows derive it from their immutable source record.
+     * Reference exposed by read APIs. Pre-cutover rows use the verified compatibility snapshot.
      */
     @Formula("""
-        coalesce(reference_no,
-            case source_type
-                when 'OPENING_BALANCE' then (
-                    select i.sku from items i where i.id = product_id)
-                when 'SALE' then (
-                    select s.code from sales s where s.id = source_id)
-                when 'STOCK_ADJUSTMENT' then (
-                    select sa.stock_adjustment_code from stock_adjustments sa where sa.id = source_id)
-                when 'GOODS_RECEIPT' then (
-                    select gr.code from goods_receipts gr where gr.id = source_id)
-                when 'TRANSFER' then (
-                    select st.code from stock_transfers st where st.id = source_id)
-                else null
-            end)
+        coalesce(reference_no, (
+            select link.reference_no
+            from stock_movement_legacy_audit_links link
+            where link.stock_movement_id = id))
         """)
     private String displayReference;
 
@@ -80,19 +70,15 @@ public class StockMovement {
     private StockAdjustmentActionType adjustmentActionType;
 
     /**
-     * Exact adjustment action, derived from the immutable source line for historical movements.
+     * Exact adjustment action, snapshotted during the legacy reconciliation.
      */
     @Enumerated(EnumType.STRING)
     @Formula("""
         case when source_type = 'STOCK_ADJUSTMENT' then
             coalesce(adjustment_action_type, (
-                select sai.action_type
-                from stock_adjustment_items sai
-                where sai.stock_adjustment_id = source_id
-                  and sai.item_id = product_id
-                  and sai.stock_location = stock_location
-                order by sai.id
-                limit 1))
+                select link.adjustment_action_type
+                from stock_movement_legacy_audit_links link
+                where link.stock_movement_id = id))
         else null end
         """)
     private StockAdjustmentActionType effectiveAdjustmentActionType;

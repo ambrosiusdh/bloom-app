@@ -182,55 +182,11 @@ class PostgreSqlMigrationAndContextTest {
             assertThat(row.get("fractional_quantity_allowed")).isEqualTo(false);
         });
 
-        List<Map<String, Object>> demoStockRows = jdbcTemplate.queryForList("""
-            SELECT
-                item.sku,
-                item.stock_store,
-                item.stock_warehouse,
-                COALESCE(SUM(CASE
-                    WHEN movement.stock_location = 'STORE'
-                        THEN CASE movement.movement_type
-                            WHEN 'IN' THEN movement.quantity
-                            ELSE -movement.quantity
-                        END
-                    ELSE 0
-                END), 0) AS ledger_store,
-                COALESCE(SUM(CASE
-                    WHEN movement.stock_location = 'WAREHOUSE'
-                        THEN CASE movement.movement_type
-                            WHEN 'IN' THEN movement.quantity
-                            ELSE -movement.quantity
-                        END
-                    ELSE 0
-                END), 0) AS ledger_warehouse
-            FROM items item
-            LEFT JOIN stock_movements movement ON movement.product_id = item.id
-            WHERE item.sku LIKE 'DEMO-%'
-            GROUP BY item.id, item.sku, item.stock_store, item.stock_warehouse
-            ORDER BY item.sku
-            """);
-
-        assertThat(demoStockRows).hasSize(6);
-        assertThat(demoStockRows).allSatisfy(row -> {
-            assertThat((BigDecimal) row.get("stock_store"))
-                .isEqualByComparingTo((BigDecimal) row.get("ledger_store"));
-            assertThat((BigDecimal) row.get("stock_warehouse"))
-                .isEqualByComparingTo((BigDecimal) row.get("ledger_warehouse"));
-        });
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM sales WHERE code LIKE 'SALE/DEMO/%'", Long.class))
-            .isEqualTo(4L);
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM goods_receipts WHERE code LIKE 'GR/DEMO/%'", Long.class))
-            .isEqualTo(2L);
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM stock_transfers WHERE code LIKE 'ST/DEMO/%'", Long.class))
-            .isEqualTo(2L);
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM expenses", Long.class)).isEqualTo(3L);
-
         assertThat(tableExists("item_audit_logs")).isTrue();
         assertThat(tableExists("stock_movement_legacy_audit_links")).isTrue();
+        assertThat(columnExists("stock_movement_legacy_audit_links", "reference_no")).isTrue();
+        assertThat(columnExists(
+            "stock_movement_legacy_audit_links", "adjustment_action_type")).isTrue();
         assertThat(columnExists("stock_movements", "reference_no")).isTrue();
         assertThat(columnExists("stock_movements", "adjustment_action_type")).isTrue();
         assertThat(columnExists("items", "stock_quantity")).isTrue();
@@ -309,7 +265,7 @@ class PostgreSqlMigrationAndContextTest {
     }
 
     @Test
-    void v13ReconcilesPreCutoverAuditRowsWithoutMutatingHistoricalMovement() {
+    void legacyCutoverReconcilesPreCutoverAuditRowsWithoutMutatingHistoricalMovement() {
         String schema = "audit_cutover_" + UUID.randomUUID().toString().replace("-", "");
         if (!schema.startsWith("audit_cutover_")) {
             throw new IllegalStateException("Unsafe test schema name");
@@ -367,12 +323,248 @@ class PostgreSqlMigrationAndContextTest {
                 movementId
             )).isEqualTo(auditId);
             assertThat(jdbcTemplate.queryForObject(
+                "SELECT reference_no FROM " + schema
+                    + ".stock_movement_legacy_audit_links WHERE stock_movement_id = ?",
+                String.class,
+                movementId
+            )).isEqualTo("SALE/PRE-CUTOVER");
+            assertThat(jdbcTemplate.queryForObject(
                 "SELECT reference_no FROM " + schema + ".stock_movements WHERE id = ?",
                 String.class,
                 movementId
             )).isNull();
         } finally {
             jdbcTemplate.execute("DROP SCHEMA " + schema + " CASCADE");
+        }
+    }
+
+    @Test
+    void v14SnapshotsTheUniquelyMatchedHistoricalAdjustmentAction() {
+        String schema = createMigrationTestSchema("adjustment_snapshot");
+        try {
+            migrateSchema(schema, MigrationVersion.fromVersion("12"));
+            Long adjustmentId = jdbcTemplate.queryForObject("""
+                INSERT INTO %s.stock_adjustments (
+                    stock_adjustment_code, reason, created_at
+                ) VALUES ('SA/PRE-CUTOVER', 'Historical correction', CURRENT_TIMESTAMP)
+                RETURNING id
+                """.formatted(schema), Long.class);
+            jdbcTemplate.update("""
+                INSERT INTO %s.stock_adjustment_items (
+                    stock_adjustment_id, item_id, action_type, change_quantity,
+                    previous_stock, new_stock, stock_location
+                ) VALUES (?, 1, 'CORRECTION', 1.0000, 2.0000, 1.0000, 'STORE')
+                """.formatted(schema), adjustmentId);
+            Long movementId = jdbcTemplate.queryForObject("""
+                INSERT INTO %s.stock_movements (
+                    product_id, movement_type, source_type, source_id,
+                    quantity, created_at, stock_location, qty_before, qty_after
+                ) VALUES (1, 'OUT', 'STOCK_ADJUSTMENT', ?, 1.0000,
+                          CURRENT_TIMESTAMP, 'STORE', 2.0000, 1.0000)
+                RETURNING id
+                """.formatted(schema), Long.class, adjustmentId);
+            jdbcTemplate.update("""
+                INSERT INTO %s.item_audit_logs (
+                    item_id, qty, qty_before, qty_after, source, reference_no, created_date
+                ) VALUES (1, 1.0000, 2.0000, 1.0000,
+                          'STOCK_ADJUSTMENT', 'SA/PRE-CUTOVER', CURRENT_TIMESTAMP)
+                """.formatted(schema));
+
+            migrateSchema(schema, MigrationVersion.LATEST);
+
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT adjustment_action_type FROM " + schema
+                    + ".stock_movement_legacy_audit_links WHERE stock_movement_id = ?",
+                String.class,
+                movementId
+            )).isEqualTo("CORRECTION");
+        } finally {
+            dropMigrationTestSchema(schema);
+        }
+    }
+
+    @Test
+    void v14IgnoresPostCutoverMovementsWithoutLegacyAuditRows() {
+        String schema = createMigrationTestSchema("post_cutover_movement");
+        try {
+            migrateSchema(schema, MigrationVersion.fromVersion("13"));
+            Long movementId = jdbcTemplate.queryForObject("""
+                INSERT INTO %s.stock_movements (
+                    product_id, movement_type, source_type, source_id, reference_no,
+                    quantity, created_at, stock_location, qty_before, qty_after
+                ) VALUES (1, 'IN', 'RETURN', 99001, 'RETURN/POST-CUTOVER',
+                          1.0000, CURRENT_TIMESTAMP, 'STORE', 2.0000, 3.0000)
+                RETURNING id
+                """.formatted(schema), Long.class);
+
+            migrateSchema(schema, MigrationVersion.LATEST);
+
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT reference_no FROM " + schema + ".stock_movements WHERE id = ?",
+                String.class,
+                movementId
+            )).isEqualTo("RETURN/POST-CUTOVER");
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM " + schema
+                    + ".stock_movement_legacy_audit_links WHERE stock_movement_id = ?",
+                Long.class,
+                movementId
+            )).isZero();
+        } finally {
+            dropMigrationTestSchema(schema);
+        }
+    }
+
+    @Test
+    void v14FailsWhenHistoricalAdjustmentActionIsAmbiguous() {
+        String schema = createMigrationTestSchema("ambiguous_adjustment");
+        try {
+            migrateSchema(schema, MigrationVersion.fromVersion("12"));
+            Long adjustmentId = jdbcTemplate.queryForObject("""
+                INSERT INTO %s.stock_adjustments (
+                    stock_adjustment_code, reason, created_at
+                ) VALUES ('SA/AMBIGUOUS', 'Ambiguous lines', CURRENT_TIMESTAMP)
+                RETURNING id
+                """.formatted(schema), Long.class);
+            jdbcTemplate.update("""
+                INSERT INTO %s.stock_adjustment_items (
+                    stock_adjustment_id, item_id, action_type, change_quantity,
+                    previous_stock, new_stock, stock_location
+                ) VALUES
+                    (?, 1, 'CORRECTION', 1.0000, 2.0000, 1.0000, 'STORE'),
+                    (?, 1, 'CORRECTION', 1.0000, 2.0000, 1.0000, 'STORE')
+                """.formatted(schema), adjustmentId, adjustmentId);
+            jdbcTemplate.update("""
+                INSERT INTO %s.stock_movements (
+                    product_id, movement_type, source_type, source_id,
+                    quantity, created_at, stock_location, qty_before, qty_after
+                ) VALUES (1, 'OUT', 'STOCK_ADJUSTMENT', ?, 1.0000,
+                          CURRENT_TIMESTAMP, 'STORE', 2.0000, 1.0000)
+                """.formatted(schema), adjustmentId);
+            jdbcTemplate.update("""
+                INSERT INTO %s.item_audit_logs (
+                    item_id, qty, qty_before, qty_after, source, reference_no, created_date
+                ) VALUES (1, 1.0000, 2.0000, 1.0000,
+                          'STOCK_ADJUSTMENT', 'SA/AMBIGUOUS', CURRENT_TIMESTAMP)
+                """.formatted(schema));
+
+            assertLegacyMigrationFails(schema, "adjustment action is missing or ambiguous");
+        } finally {
+            dropMigrationTestSchema(schema);
+        }
+    }
+
+    @Test
+    void v13FailsWhenHistoricalMovementHasNoAudit() {
+        String schema = createMigrationTestSchema("movement_without_audit");
+        try {
+            migrateSchema(schema, MigrationVersion.fromVersion("12"));
+            Long saleId = jdbcTemplate.queryForObject(
+                "INSERT INTO " + schema + ".sales (code, payment_type, created_at) "
+                    + "VALUES ('SALE/UNMATCHED-MOVEMENT', 'CASH', CURRENT_TIMESTAMP) RETURNING id",
+                Long.class
+            );
+            jdbcTemplate.update("""
+                INSERT INTO %s.stock_movements (
+                    product_id, movement_type, source_type, source_id,
+                    quantity, created_at, stock_location, qty_before, qty_after
+                ) VALUES (1, 'OUT', 'SALE', ?, 1.0000, CURRENT_TIMESTAMP, 'STORE', 2.0000, 1.0000)
+                """.formatted(schema), saleId);
+
+            assertLegacyMigrationFails(schema, "coverage is not one-to-one");
+        } finally {
+            dropMigrationTestSchema(schema);
+        }
+    }
+
+    @Test
+    void v13FailsWhenHistoricalAuditHasNoMovement() {
+        String schema = createMigrationTestSchema("audit_without_movement");
+        try {
+            migrateSchema(schema, MigrationVersion.fromVersion("12"));
+            jdbcTemplate.update("""
+                INSERT INTO %s.item_audit_logs (
+                    item_id, qty, qty_before, qty_after, source, reference_no, created_date
+                ) VALUES (1, 1.0000, 2.0000, 1.0000, 'SALE', 'SALE/UNMATCHED-AUDIT', CURRENT_TIMESTAMP)
+                """.formatted(schema));
+
+            assertLegacyMigrationFails(schema, "coverage is not one-to-one");
+        } finally {
+            dropMigrationTestSchema(schema);
+        }
+    }
+
+    @Test
+    void v13FailsWhenHistoricalReferenceDoesNotMatchItsSource() {
+        String schema = createMigrationTestSchema("mismatched_reference");
+        try {
+            migrateSchema(schema, MigrationVersion.fromVersion("12"));
+            Long saleId = jdbcTemplate.queryForObject(
+                "INSERT INTO " + schema + ".sales (code, payment_type, created_at) "
+                    + "VALUES ('SALE/EXPECTED', 'CASH', CURRENT_TIMESTAMP) RETURNING id",
+                Long.class
+            );
+            jdbcTemplate.update("""
+                INSERT INTO %s.stock_movements (
+                    product_id, movement_type, source_type, source_id,
+                    quantity, created_at, stock_location, qty_before, qty_after
+                ) VALUES (1, 'OUT', 'SALE', ?, 1.0000, CURRENT_TIMESTAMP, 'STORE', 2.0000, 1.0000)
+                """.formatted(schema), saleId);
+            jdbcTemplate.update("""
+                INSERT INTO %s.item_audit_logs (
+                    item_id, qty, qty_before, qty_after, source, reference_no, created_date
+                ) VALUES (1, 1.0000, 2.0000, 1.0000, 'SALE', 'SALE/WRONG', CURRENT_TIMESTAMP)
+                """.formatted(schema));
+
+            assertLegacyMigrationFails(schema, "historical reference cannot be reconstructed");
+        } finally {
+            dropMigrationTestSchema(schema);
+        }
+    }
+
+    @Test
+    void v14FailsRatherThanKeepingRankedAmbiguousHistoricalCandidates() {
+        String schema = createMigrationTestSchema("ambiguous_history");
+        try {
+            migrateSchema(schema, MigrationVersion.fromVersion("12"));
+            Long adjustmentId = jdbcTemplate.queryForObject("""
+                INSERT INTO %s.stock_adjustments (
+                    stock_adjustment_code, reason, created_at
+                ) VALUES ('SA/PAIRING-AMBIGUOUS', 'Ambiguous historical pairing', CURRENT_TIMESTAMP)
+                RETURNING id
+                """.formatted(schema), Long.class);
+            jdbcTemplate.update("""
+                INSERT INTO %s.stock_adjustment_items (
+                    stock_adjustment_id, item_id, action_type, change_quantity,
+                    previous_stock, new_stock, stock_location
+                ) VALUES
+                    (?, 1, 'CORRECTION', 1.0000, 2.0000, 1.0000, 'STORE'),
+                    (?, 1, 'CORRECTION', 1.0000, 2.0000, 1.0000, 'STORE')
+                """.formatted(schema), adjustmentId, adjustmentId);
+            jdbcTemplate.update("""
+                INSERT INTO %s.stock_movements (
+                    product_id, movement_type, source_type, source_id,
+                    quantity, created_at, stock_location, qty_before, qty_after
+                ) VALUES
+                    (1, 'OUT', 'STOCK_ADJUSTMENT', ?, 1.0000,
+                     CURRENT_TIMESTAMP, 'STORE', 2.0000, 1.0000),
+                    (1, 'OUT', 'STOCK_ADJUSTMENT', ?, 1.0000,
+                     CURRENT_TIMESTAMP, 'STORE', 2.0000, 1.0000)
+                """.formatted(schema), adjustmentId, adjustmentId);
+            jdbcTemplate.update("""
+                INSERT INTO %s.item_audit_logs (
+                    item_id, qty, qty_before, qty_after, source,
+                    reference_no, created_date
+                ) VALUES
+                    (1, 1.0000, 2.0000, 1.0000, 'STOCK_ADJUSTMENT',
+                     'SA/PAIRING-AMBIGUOUS', CURRENT_TIMESTAMP),
+                    (1, 1.0000, 2.0000, 1.0000, 'STOCK_ADJUSTMENT',
+                     'SA/PAIRING-AMBIGUOUS', CURRENT_TIMESTAMP)
+                """.formatted(schema));
+
+            assertLegacyMigrationFails(schema, "match is missing or ambiguous");
+        } finally {
+            dropMigrationTestSchema(schema);
         }
     }
 
@@ -445,9 +637,10 @@ class PostgreSqlMigrationAndContextTest {
     void enforcesSingleGlobalOpenCashSessionAndRequiredExpenseSession() {
         assertThat(columnIsNullable("expenses", "cash_session_id")).isFalse();
 
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM cash_sessions WHERE status = 'OPEN'", Long.class))
-            .isEqualTo(1L);
+        jdbcTemplate.update("""
+            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at, version)
+            VALUES (1, 100.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
+            """);
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
             INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at, version)
@@ -536,6 +729,27 @@ class PostgreSqlMigrationAndContextTest {
     }
 
     @Test
+    void treatsStockMovementEndDateAsAnExactInclusiveInstant() {
+        Long itemId = insertInventoryItem("LEDGER-END-INSTANT", new BigDecimal("5.0000"));
+        Instant boundary = Instant.parse("2098-08-31T23:59:59Z");
+        Long includedId = insertStockMovement(
+            itemId, MovementType.OUT, MovementSourceType.RETURN, 91_001L,
+            StockLocation.STORE, boundary, "RETURN-AT-BOUNDARY");
+        insertStockMovement(
+            itemId, MovementType.OUT, MovementSourceType.RETURN, 91_002L,
+            StockLocation.STORE, boundary.plusMillis(500), "RETURN-AFTER-BOUNDARY");
+
+        Page<StockMovementResponse> result = stockMovementQueryService.filterMovements(
+            FilterStockMovementRequest.builder().itemId(itemId).endDate(boundary).build(),
+            PageRequest.of(0, 10)
+        );
+
+        assertThat(result.getContent())
+            .extracting(StockMovementResponse::getId)
+            .containsExactly(includedId);
+    }
+
+    @Test
     void derivesHistoricalReferenceAndCorrectionActionWithoutMutatingMovement() {
         Long itemId = insertInventoryItem("HISTORICAL-LEDGER", new BigDecimal("5.0000"));
         long sharedSourceId = 9_000_000L + itemId;
@@ -569,11 +783,13 @@ class PostgreSqlMigrationAndContextTest {
         );
         jdbcTemplate.update(
             """
-            INSERT INTO stock_movement_legacy_audit_links (stock_movement_id, item_audit_log_id)
-            VALUES (?, ?)
+            INSERT INTO stock_movement_legacy_audit_links (
+                stock_movement_id, item_audit_log_id, reference_no
+            ) VALUES (?, ?, ?)
             """,
             historicalMovementId,
-            legacyAuditId
+            legacyAuditId,
+            saleCode
         );
 
         Page<StockMovementResponse> historicalSale = stockMovementQueryService.filterMovements(
@@ -584,6 +800,12 @@ class PostgreSqlMigrationAndContextTest {
                 assertThat(movement.getReferenceNo()).isEqualTo(saleCode);
                 assertThat(movement.getLegacyAuditLogId()).isEqualTo(legacyAuditId);
             });
+
+        jdbcTemplate.update(
+            "UPDATE sales SET code = ? WHERE id = ?",
+            "SALE/RENAMED/" + UUID.randomUUID(),
+            saleId
+        );
 
         String adjustmentCode = "SA/HISTORICAL/" + UUID.randomUUID();
         Long adjustmentId = jdbcTemplate.queryForObject(
@@ -611,6 +833,30 @@ class PostgreSqlMigrationAndContextTest {
         Long historicalCorrectionId = insertStockMovement(
             itemId, MovementType.OUT, MovementSourceType.STOCK_ADJUSTMENT,
             adjustmentId, StockLocation.STORE, Instant.parse("2026-07-02T10:00:00Z"), null);
+        Long correctionAuditId = jdbcTemplate.queryForObject(
+            """
+            INSERT INTO item_audit_logs (
+                item_id, qty, qty_before, qty_after, source,
+                reference_no, created_by, created_date
+            ) VALUES (?, 1.0000, 2.0000, 1.0000, 'STOCK_ADJUSTMENT', ?, 'legacy', ?)
+            RETURNING id
+            """,
+            Long.class,
+            itemId,
+            adjustmentCode,
+            Timestamp.from(Instant.parse("2026-07-02T10:00:00Z"))
+        );
+        jdbcTemplate.update(
+            """
+            INSERT INTO stock_movement_legacy_audit_links (
+                stock_movement_id, item_audit_log_id,
+                reference_no, adjustment_action_type
+            ) VALUES (?, ?, ?, 'CORRECTION')
+            """,
+            historicalCorrectionId,
+            correctionAuditId,
+            adjustmentCode
+        );
 
         Page<StockMovementResponse> historicalCorrection = stockMovementQueryService.filterMovements(
             FilterStockMovementRequest.builder()
@@ -1148,6 +1394,39 @@ class PostgreSqlMigrationAndContextTest {
             indexName
         );
         return Boolean.TRUE.equals(exists);
+    }
+
+    private String createMigrationTestSchema(String purpose) {
+        String schema = "v13_" + purpose + "_"
+            + UUID.randomUUID().toString().replace("-", "");
+        if (!schema.matches("[a-z0-9_]+")) {
+            throw new IllegalStateException("Unsafe test schema name");
+        }
+        jdbcTemplate.execute("CREATE SCHEMA " + schema);
+        return schema;
+    }
+
+    private void dropMigrationTestSchema(String schema) {
+        if (schema == null || !schema.matches("v13_[a-z0-9_]+")) {
+            throw new IllegalStateException("Unsafe test schema name");
+        }
+        jdbcTemplate.execute("DROP SCHEMA " + schema + " CASCADE");
+    }
+
+    private void migrateSchema(String schema, MigrationVersion target) {
+        Flyway.configure()
+            .dataSource(Objects.requireNonNull(jdbcTemplate.getDataSource()))
+            .locations("classpath:migration")
+            .schemas(schema)
+            .defaultSchema(schema)
+            .target(target)
+            .load()
+            .migrate();
+    }
+
+    private void assertLegacyMigrationFails(String schema, String expectedMessage) {
+        assertThatThrownBy(() -> migrateSchema(schema, MigrationVersion.LATEST))
+            .hasStackTraceContaining(expectedMessage);
     }
 
     private Long insertInventoryItem(String purpose, BigDecimal storeStock) {

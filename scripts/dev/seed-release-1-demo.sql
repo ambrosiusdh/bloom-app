@@ -1,18 +1,36 @@
--- Release 1 demonstration data for end-to-end frontend testing.
--- All DEMO items have a complete, internally consistent StockMovement history.
--- Existing V2 records remain unchanged so legacy migration assertions stay stable.
+-- Development-only Release 1 demonstration data for frontend testing.
+-- Run manually after Flyway has migrated the database through V14.
+-- This script is intentionally outside the production Flyway location.
+-- Demo login: kasir.demo / password
+-- The transaction-level guard makes accidental retries fail before any data changes.
+
+BEGIN;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM users WHERE username = 'kasir.demo')
+        OR EXISTS (SELECT 1 FROM items WHERE sku LIKE 'DEMO-%')
+        OR EXISTS (SELECT 1 FROM sales WHERE code LIKE 'SALE/DEMO/%')
+        OR EXISTS (SELECT 1 FROM goods_receipts WHERE code LIKE 'GR/DEMO/%')
+        OR EXISTS (SELECT 1 FROM stock_transfers WHERE code LIKE 'ST/DEMO/%') THEN
+        RAISE EXCEPTION
+            'Release 1 demo data already exists; refusing to create duplicate business history';
+    END IF;
+END
+$$;
 
 INSERT INTO users (
     username, password, role, name,
     created_at, updated_at, created_by, updated_by
 )
-SELECT
-    'kasir.demo', password, 'cashier', 'Kasir Demo',
+VALUES (
+    'kasir.demo',
+    '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi.',
+    'cashier', 'Kasir Demo',
     CURRENT_TIMESTAMP - INTERVAL '30 days',
     CURRENT_TIMESTAMP - INTERVAL '30 days',
     'SYSTEM', 'SYSTEM'
-FROM users
-WHERE username = 'admin';
+);
 
 INSERT INTO items (
     name, sku, description, price, stock_quantity,
@@ -492,3 +510,5 @@ DO UPDATE SET current_sequence = GREATEST(
     document_counters.current_sequence,
     EXCLUDED.current_sequence
 );
+
+COMMIT;
