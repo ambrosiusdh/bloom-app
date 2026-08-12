@@ -2,6 +2,7 @@ package com.bloom.app.domain.model;
 
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
+import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -48,6 +49,13 @@ public class StockMovement {
 
     @Column(name = "source_id", nullable = false)
     private Long sourceId;
+
+    @Column(name = "reference_no", nullable = false, length = 100)
+    private String referenceNo;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "adjustment_action_type")
+    private StockAdjustmentActionType adjustmentActionType;
 
     @Column(name = "quantity", nullable = false, precision = 19, scale = 4)
     private BigDecimal quantity;

@@ -14,7 +14,6 @@ import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
 import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
-import com.bloom.app.persistence.repository.ItemAuditLogRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import org.junit.jupiter.api.Test;
@@ -35,9 +34,8 @@ import static org.mockito.Mockito.when;
 class StockMovementServiceImplTest {
     private final StockMovementRepository stockMovementRepository = mock(StockMovementRepository.class);
     private final ItemRepository itemRepository = mock(ItemRepository.class);
-    private final ItemAuditLogRepository itemAuditLogRepository = mock(ItemAuditLogRepository.class);
     private final StockMovementServiceImpl service = new StockMovementServiceImpl(
-        stockMovementRepository, itemRepository, itemAuditLogRepository);
+        stockMovementRepository, itemRepository);
 
     @Test
     void recordsFractionalMovementWithoutRounding() {
@@ -54,6 +52,7 @@ class StockMovementServiceImplTest {
         assertThat(movementCaptor.getValue().getQuantity()).isEqualByComparingTo("0.2500");
         assertThat(movementCaptor.getValue().getQtyBefore()).isEqualByComparingTo("1.2500");
         assertThat(movementCaptor.getValue().getQtyAfter()).isEqualByComparingTo("1.0000");
+        assertThat(movementCaptor.getValue().getReferenceNo()).isEqualTo("SALE-1");
         assertThat(movementCaptor.getValue().getQtyAfter()).isEqualByComparingTo(
             movementCaptor.getValue().getQtyBefore().subtract(movementCaptor.getValue().getQuantity()));
     }
@@ -68,7 +67,7 @@ class StockMovementServiceImplTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("Fractional quantity is not allowed for this item");
 
-        verifyNoInteractions(itemRepository, stockMovementRepository, itemAuditLogRepository);
+        verifyNoInteractions(itemRepository, stockMovementRepository);
     }
 
     @Test
@@ -81,7 +80,7 @@ class StockMovementServiceImplTest {
             .isInstanceOf(InsufficientStockException.class)
             .hasMessageContaining("Insufficient stock");
 
-        verifyNoInteractions(itemRepository, stockMovementRepository, itemAuditLogRepository);
+        verifyNoInteractions(itemRepository, stockMovementRepository);
     }
 
     @Test
@@ -96,7 +95,7 @@ class StockMovementServiceImplTest {
             .isInstanceOf(StockConcurrencyException.class)
             .hasMessageContaining("modified concurrently");
 
-        verifyNoInteractions(stockMovementRepository, itemAuditLogRepository);
+        verifyNoInteractions(stockMovementRepository);
     }
 
     @Test
@@ -154,6 +153,26 @@ class StockMovementServiceImplTest {
         assertThat(movementCaptor.getValue().getQuantity()).isEqualByComparingTo("3.7500");
         assertThat(movementCaptor.getValue().getQtyBefore()).isEqualByComparingTo("5.0000");
         assertThat(movementCaptor.getValue().getQtyAfter()).isEqualByComparingTo("1.2500");
+        assertThat(movementCaptor.getValue().getAdjustmentActionType())
+            .isEqualTo(StockAdjustmentActionType.CORRECTION);
+    }
+
+    @Test
+    void rejectsMissingOrOversizedReferencesBeforeChangingStock() {
+        Item item = item(true, "1.0000");
+
+        assertThatThrownBy(() -> service.recordMovement(
+            MovementSourceType.SALE, 1L, item, new BigDecimal("0.2500"),
+            MovementType.OUT, " ", StockLocation.STORE))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Movement reference is required");
+        assertThatThrownBy(() -> service.recordMovement(
+            MovementSourceType.SALE, 1L, item, new BigDecimal("0.2500"),
+            MovementType.OUT, "X".repeat(101), StockLocation.STORE))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Movement reference must not exceed 100 characters");
+
+        verifyNoInteractions(itemRepository, stockMovementRepository);
     }
 
     @Test

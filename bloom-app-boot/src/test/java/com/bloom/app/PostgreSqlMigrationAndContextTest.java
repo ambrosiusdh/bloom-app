@@ -7,10 +7,12 @@ import com.bloom.app.api.dto.request.stockadjustment.StockAdjustmentItemRequest;
 import com.bloom.app.api.dto.request.stocktransfer.CreateStockTransferRequest;
 import com.bloom.app.api.dto.request.stocktransfer.FilterStockTransferRequest;
 import com.bloom.app.api.dto.request.stocktransfer.StockTransferLineRequest;
+import com.bloom.app.api.dto.request.stockmovement.FilterStockMovementRequest;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
 import com.bloom.app.api.dto.response.stocktransfer.StockTransferResponse;
 import com.bloom.app.api.dto.response.stocktransfer.StockTransferSummaryResponse;
+import com.bloom.app.api.dto.response.stockmovement.StockMovementResponse;
 import com.bloom.app.domain.enums.DocumentType;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
@@ -36,6 +38,7 @@ import com.bloom.app.persistence.repository.StockTransferRepository;
 import com.bloom.app.service.SaleService;
 import com.bloom.app.service.StockAdjustmentService;
 import com.bloom.app.service.StockMovementService;
+import com.bloom.app.service.StockMovementQueryService;
 import com.bloom.app.service.StockTransferService;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
@@ -51,6 +54,9 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import jakarta.persistence.EntityManagerFactory;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.util.List;
@@ -102,6 +108,12 @@ class PostgreSqlMigrationAndContextTest {
     private StockMovementService stockMovementService;
 
     @Autowired
+    private StockMovementQueryService stockMovementQueryService;
+
+    @Autowired
+    private EntityManagerFactory entityManagerFactory;
+
+    @Autowired
     private SaleService saleService;
 
     @Autowired
@@ -136,6 +148,7 @@ class PostgreSqlMigrationAndContextTest {
                 () -> System.getProperty("bloom.test.database.password", "postgres")
             );
         }
+        registry.add("spring.jpa.properties.hibernate.generate_statistics", () -> "true");
     }
 
     @AfterAll
@@ -146,8 +159,8 @@ class PostgreSqlMigrationAndContextTest {
     }
 
     @Test
-    void appliesAllMigrationsAndBackfillsLegacyStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("11");
+    void appliesAllMigrationsAndBackfillsBaselineStockIntoStore() {
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("12");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
@@ -167,7 +180,11 @@ class PostgreSqlMigrationAndContextTest {
             assertThat(row.get("fractional_quantity_allowed")).isEqualTo(false);
         });
 
-        assertThat(tableExists("item_audit_logs")).isTrue();
+        assertThat(tableExists("item_audit_logs")).isFalse();
+        assertThat(tableExists("stock_movement_legacy_audit_links")).isFalse();
+        assertThat(columnExists("stock_movements", "reference_no")).isTrue();
+        assertThat(columnExists("stock_movements", "adjustment_action_type")).isTrue();
+        assertThat(columnIsNullable("stock_movements", "reference_no")).isFalse();
         assertThat(columnExists("items", "stock_quantity")).isTrue();
         assertThat(tableExists("suppliers")).isTrue();
         assertThat(tableExists("cash_sessions")).isTrue();
@@ -189,10 +206,16 @@ class PostgreSqlMigrationAndContextTest {
             "stock_movements",
             "chk_stock_movements_balance_equation"
         )).isTrue();
+        assertThat(constraintExists(
+            "stock_movements",
+            "chk_stock_movements_adjustment_action"
+        )).isTrue();
         assertThat(indexExists("uq_stock_movements_sale_item_location")).isTrue();
         assertThat(indexExists("uq_stock_movements_transfer_item_location")).isTrue();
         assertThat(indexExists("idx_stock_transfers_history_order")).isTrue();
         assertThat(indexExists("idx_stock_transfer_lines_item_transfer")).isTrue();
+        assertThat(indexExists("idx_stock_movements_history_order")).isTrue();
+        assertThat(indexExists("idx_stock_movements_product_history")).isTrue();
 
         assertThat(numericScale("items", "price")).isEqualTo(4);
         assertThat(numericScale("sales", "subtotal_amount")).isEqualTo(4);
@@ -218,9 +241,6 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(numericScale("stock_movements", "quantity")).isEqualTo(4);
         assertThat(numericScale("stock_movements", "qty_before")).isEqualTo(4);
         assertThat(numericScale("stock_movements", "qty_after")).isEqualTo(4);
-        assertThat(numericScale("item_audit_logs", "qty")).isEqualTo(4);
-        assertThat(numericScale("item_audit_logs", "qty_before")).isEqualTo(4);
-        assertThat(numericScale("item_audit_logs", "qty_after")).isEqualTo(4);
         assertThat(numericScale("stock_transfer_lines", "quantity")).isEqualTo(4);
         assertThat(columnExists("stock_transfer_lines", "item_sku")).isTrue();
         assertThat(columnExists("stock_transfer_lines", "item_name")).isTrue();
@@ -233,9 +253,9 @@ class PostgreSqlMigrationAndContextTest {
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
             INSERT INTO stock_movements (
-                product_id, movement_type, source_type, source_id, quantity,
+                product_id, movement_type, source_type, source_id, reference_no, quantity,
                 created_at, stock_location, qty_before, qty_after
-            ) VALUES (1, 'IN', 'OPENING_BALANCE', 1, 1.0000,
+            ) VALUES (1, 'IN', 'OPENING_BALANCE', 1, 'OPENING-1', 1.0000,
                       CURRENT_TIMESTAMP, 'STORE', 0.0000, 2.0000)
             """))
             .isInstanceOf(DataIntegrityViolationException.class);
@@ -323,7 +343,7 @@ class PostgreSqlMigrationAndContextTest {
     }
 
     @Test
-    void rollsBackBalanceAndMovementWhenLegacyAuditWriteFails() {
+    void rejectsOversizedLedgerReferenceBeforeChangingBalance() {
         Long itemId = insertInventoryItem("ROLLBACK", new BigDecimal("1.0000"));
         Item item = itemRepository.findById(itemId).orElseThrow();
         Sale sale = Sale.builder()
@@ -337,14 +357,83 @@ class PostgreSqlMigrationAndContextTest {
             .build();
 
         assertThatThrownBy(() -> stockMovementService.recordSaleMovements(sale))
-            .isInstanceOf(DataIntegrityViolationException.class);
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Movement reference must not exceed 100 characters");
 
         assertThat(itemRepository.findById(itemId).orElseThrow().getStockStore())
             .isEqualByComparingTo("1.0000");
         assertThat(stockMovementRepository.findByProductId(itemId)).isEmpty();
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM item_audit_logs WHERE item_id = ?", Long.class, itemId))
-            .isZero();
+    }
+
+    @Test
+    void filtersStockMovementRepositoryWithoutNPlusOneQueries() {
+        Long itemId = insertInventoryItem("LEDGER-QUERY", new BigDecimal("5.0000"));
+        Long otherItemId = insertInventoryItem("LEDGER-QUERY-OTHER", new BigDecimal("5.0000"));
+        String sku = jdbcTemplate.queryForObject(
+            "SELECT sku FROM items WHERE id = ?", String.class, itemId);
+        Instant first = Instant.parse("2098-08-10T10:00:00Z");
+        Instant second = Instant.parse("2098-08-11T10:00:00Z");
+
+        insertStockMovement(itemId, MovementType.OUT, MovementSourceType.SALE, 91L,
+            StockLocation.STORE, first, "SALE-REF-91");
+        insertStockMovement(itemId, MovementType.OUT, MovementSourceType.SALE, 92L,
+            StockLocation.STORE, second, "SALE-REF-92");
+        insertStockMovement(otherItemId, MovementType.OUT, MovementSourceType.SALE, 93L,
+            StockLocation.STORE, second, "SALE-REF-93");
+        insertStockMovement(itemId, MovementType.IN, MovementSourceType.RETURN, 94L,
+            StockLocation.WAREHOUSE, second, "RETURN-REF-94");
+
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+        Page<StockMovementResponse> result = stockMovementQueryService.filterMovements(
+            FilterStockMovementRequest.builder()
+                .itemId(itemId)
+                .itemSku("  " + sku.toLowerCase() + "  ")
+                .sourceType(MovementSourceType.SALE)
+                .movementType(MovementType.OUT)
+                .location(StockLocation.STORE)
+                .startDate(Instant.parse("2098-08-10T00:00:00Z"))
+                .endDate(Instant.parse("2098-08-12T00:00:00Z"))
+                .reference(" ref ")
+                .build(),
+            PageRequest.of(0, 1)
+        );
+
+        assertThat(result.getTotalElements()).isEqualTo(2);
+        assertThat(result.getContent()).singleElement().satisfies(movement -> {
+            assertThat(movement.getReferenceNo()).isEqualTo("SALE-REF-92");
+            assertThat(movement.getItem().getSku()).isEqualTo(sku);
+            assertThat(movement.getItem().getCategory()).isNotNull();
+            assertThat(movement.getLocation()).isEqualTo(StockLocation.STORE);
+        });
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(2L);
+        assertThat(stockMovementQueryService.filterMovements(
+            FilterStockMovementRequest.builder().itemId(itemId).reference("_").build(),
+            PageRequest.of(0, 10)).getContent()).isEmpty();
+        assertThat(stockMovementQueryService.filterMovements(
+            FilterStockMovementRequest.builder().itemId(itemId).reference("%").build(),
+            PageRequest.of(0, 10)).getContent()).isEmpty();
+    }
+
+    @Test
+    void treatsStockMovementEndDateAsAnExactInclusiveInstant() {
+        Long itemId = insertInventoryItem("LEDGER-END-INSTANT", new BigDecimal("5.0000"));
+        Instant boundary = Instant.parse("2098-08-31T23:59:59Z");
+        Long includedId = insertStockMovement(
+            itemId, MovementType.OUT, MovementSourceType.RETURN, 91_001L,
+            StockLocation.STORE, boundary, "RETURN-AT-BOUNDARY");
+        insertStockMovement(
+            itemId, MovementType.OUT, MovementSourceType.RETURN, 91_002L,
+            StockLocation.STORE, boundary.plusMillis(500), "RETURN-AFTER-BOUNDARY");
+
+        Page<StockMovementResponse> result = stockMovementQueryService.filterMovements(
+            FilterStockMovementRequest.builder().itemId(itemId).endDate(boundary).build(),
+            PageRequest.of(0, 10)
+        );
+
+        assertThat(result.getContent())
+            .extracting(StockMovementResponse::getId)
+            .containsExactly(includedId);
     }
 
     @Test
@@ -467,6 +556,8 @@ class PostgreSqlMigrationAndContextTest {
                 assertThat(movement.getQuantity()).isEqualByComparingTo("0.7500");
                 assertThat(movement.getQtyBefore()).isEqualByComparingTo("1.0000");
                 assertThat(movement.getQtyAfter()).isEqualByComparingTo("0.2500");
+                assertThat(movement.getAdjustmentActionType())
+                    .isEqualTo(StockAdjustmentActionType.CORRECTION);
             });
     }
 
@@ -516,6 +607,7 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(movements).allSatisfy(movement -> {
             assertThat(movement.getSourceType()).isEqualTo(MovementSourceType.TRANSFER);
             assertThat(movement.getSourceId()).isEqualTo(saved.getId());
+            assertThat(movement.getReferenceNo()).isEqualTo(saved.getCode());
         });
         assertThat(movements).filteredOn(movement -> movement.getMovementType() == MovementType.OUT)
             .extracting(movement -> movement.getStockLocation())
@@ -523,15 +615,6 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(movements).filteredOn(movement -> movement.getMovementType() == MovementType.IN)
             .extracting(movement -> movement.getStockLocation())
             .containsOnly(StockLocation.WAREHOUSE);
-        assertThat(jdbcTemplate.queryForObject(
-            """
-            SELECT COUNT(*) FROM item_audit_logs
-            WHERE source = 'TRANSFER' AND reference_no = ?
-            """,
-            Long.class,
-            saved.getCode()
-        )).isEqualTo(4L);
-
         String renamedSku = "RENAMED-" + UUID.randomUUID();
         jdbcTemplate.update(
             "UPDATE items SET name = ?, sku = ?, version = version + 1 WHERE id = ?",
@@ -607,12 +690,6 @@ class PostgreSqlMigrationAndContextTest {
         });
         assertThat(jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM stock_movements WHERE product_id IN (?, ?)",
-            Long.class,
-            firstItemId,
-            failingItemId
-        )).isZero();
-        assertThat(jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM item_audit_logs WHERE item_id IN (?, ?)",
             Long.class,
             firstItemId,
             failingItemId
@@ -863,6 +940,7 @@ class PostgreSqlMigrationAndContextTest {
         return Boolean.TRUE.equals(exists);
     }
 
+
     private Long insertInventoryItem(String purpose, BigDecimal storeStock) {
         return jdbcTemplate.queryForObject(
             """
@@ -878,6 +956,38 @@ class PostgreSqlMigrationAndContextTest {
             purpose + "-" + UUID.randomUUID(),
             storeStock,
             storeStock
+        );
+    }
+
+    private Long insertStockMovement(
+            Long itemId,
+            MovementType movementType,
+            MovementSourceType sourceType,
+            Long sourceId,
+            StockLocation location,
+            Instant createdAt,
+            String referenceNo) {
+        BigDecimal before = movementType == MovementType.IN
+            ? BigDecimal.ZERO : new BigDecimal("2.0000");
+        BigDecimal after = BigDecimal.ONE;
+        return jdbcTemplate.queryForObject(
+            """
+            INSERT INTO stock_movements (
+                product_id, movement_type, source_type, source_id, reference_no,
+                quantity, created_at, created_by, stock_location, qty_before, qty_after
+            ) VALUES (?, ?, ?, ?, ?, 1.0000, ?, 'query-test', ?, ?, ?)
+            RETURNING id
+            """,
+            Long.class,
+            itemId,
+            movementType.name(),
+            sourceType.name(),
+            sourceId,
+            referenceNo,
+            Timestamp.from(createdAt),
+            location.name(),
+            before,
+            after
         );
     }
 

@@ -95,21 +95,6 @@ CREATE TABLE stock_adjustment_items (
 CREATE INDEX idx_stock_adjustment_items_stock_adjustment_id ON stock_adjustment_items(stock_adjustment_id);
 CREATE INDEX idx_stock_adjustment_items_item_id ON stock_adjustment_items(item_id);
 
-CREATE TABLE item_audit_logs (
-    id BIGSERIAL PRIMARY KEY,
-    item_id BIGINT NOT NULL,
-    qty INTEGER NOT NULL,
-    qty_before INTEGER NOT NULL,
-    qty_after INTEGER NOT NULL,
-    source VARCHAR(50) NOT NULL,
-    reference_no VARCHAR(100),
-    created_by VARCHAR(255),
-    created_date TIMESTAMP NOT NULL,
-    CONSTRAINT fk_item_audit_logs_item FOREIGN KEY (item_id) REFERENCES items(id)
-);
-
-CREATE INDEX idx_item_audit_logs_item_id ON item_audit_logs(item_id);
-
 CREATE TABLE users (
        id BIGSERIAL PRIMARY KEY,
        username VARCHAR(255) NOT NULL UNIQUE,

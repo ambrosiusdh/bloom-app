@@ -3,13 +3,13 @@ package com.bloom.app.service.impl;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
+import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
 import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.model.*;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
-import com.bloom.app.persistence.repository.ItemAuditLogRepository;
 import com.bloom.app.service.StockMovementService;
 import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import lombok.RequiredArgsConstructor;
@@ -29,11 +29,10 @@ public class StockMovementServiceImpl implements StockMovementService {
 
     private final StockMovementRepository stockMovementRepository;
     private final ItemRepository itemRepository;
-    private final ItemAuditLogRepository itemAuditLogRepository;
 
     /**
      * Generic method to record a stock movement.
-     * Updates the Item stock quantity and logs to ItemAuditLog.
+     * Updates the item balance and records the authoritative StockMovement ledger entry.
      */
     @Transactional
     public void recordMovement(
@@ -44,6 +43,20 @@ public class StockMovementServiceImpl implements StockMovementService {
         MovementType movementType,
         String referenceNo,
         StockLocation stockLocation
+    ) {
+        recordMovement(
+            sourceType, sourceId, item, quantity, movementType, referenceNo, stockLocation, null);
+    }
+
+    private void recordMovement(
+        MovementSourceType sourceType,
+        Long sourceId,
+        Item item,
+        BigDecimal quantity,
+        MovementType movementType,
+        String referenceNo,
+        StockLocation stockLocation,
+        StockAdjustmentActionType adjustmentActionType
     ) {
         if (item == null) {
             throw new IllegalArgumentException("Item is required");
@@ -62,6 +75,12 @@ public class StockMovementServiceImpl implements StockMovementService {
         }
         if (stockLocation == null) {
             throw new IllegalArgumentException("Stock location is required");
+        }
+        if (referenceNo == null || referenceNo.isBlank()) {
+            throw new IllegalArgumentException("Movement reference is required");
+        }
+        if (referenceNo.length() > 100) {
+            throw new IllegalArgumentException("Movement reference must not exceed 100 characters");
         }
         log.debug("Recording movement: item={}, qty={}, type={}, source={}, location={}", item.getSku(), quantity, movementType,
                 sourceType, stockLocation);
@@ -95,22 +114,14 @@ public class StockMovementServiceImpl implements StockMovementService {
                 .movementType(movementType)
                 .sourceType(sourceType)
                 .sourceId(sourceId)
+                .referenceNo(referenceNo)
+                .adjustmentActionType(adjustmentActionType)
                 .quantity(quantity)
                 .stockLocation(stockLocation)
                 .qtyBefore(previousStock)
                 .qtyAfter(newStock)
                 .build();
         stockMovementRepository.saveAndFlush(movement);
-
-        ItemAuditLog auditLog = ItemAuditLog.builder()
-                .item(persistedItem)
-                .qty(quantity)
-                .qtyBefore(previousStock)
-                .qtyAfter(newStock)
-                .source(sourceType)
-                .referenceNo(referenceNo)
-                .build();
-        itemAuditLogRepository.saveAndFlush(auditLog);
     }
 
     // Helper to record sales
@@ -174,7 +185,8 @@ public class StockMovementServiceImpl implements StockMovementService {
                     movement.quantity(),
                     movement.movementType(),
                     adjustment.getStockAdjustmentCode(),
-                    item.getStockLocation()
+                    item.getStockLocation(),
+                    item.getActionType()
                 );
             }
         }

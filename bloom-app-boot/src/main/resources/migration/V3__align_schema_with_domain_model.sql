@@ -1,5 +1,4 @@
 -- Align the V1 schema with the location-aware inventory and currently scanned entities.
--- V1/V2 columns and item_audit_logs intentionally remain available for a later cleanup.
 
 -- V2 contains disposable test inventory in one stock bucket. Treat that bucket as
 -- immediately saleable STORE stock and start WAREHOUSE at zero. Keeping stock_quantity
@@ -54,12 +53,12 @@ ALTER TABLE sales
         USING paid_amount::NUMERIC(19, 4);
 
 -- A movement's before/after balances cannot be reconstructed safely from V1 data.
--- The committed V1/V2 lineage has no rows here; fail clearly instead of fabricating audit data.
+-- The committed V1/V2 lineage has no rows here; fail clearly instead of fabricating movement history.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM stock_movements) THEN
         RAISE EXCEPTION
-            'Cannot add stock movement balances: legacy stock_movements require an approved reconstruction rule';
+            'Cannot add stock movement balances: pre-existing stock_movements require an approved reconstruction rule';
     END IF;
 END
 $$;
