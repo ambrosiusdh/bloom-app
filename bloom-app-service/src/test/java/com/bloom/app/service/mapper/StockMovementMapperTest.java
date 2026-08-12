@@ -33,7 +33,7 @@ class StockMovementMapperTest {
     }
 
     @Test
-    void mapsLedgerAndLegacyAuditShapesWithoutLosingReferenceData() {
+    void mapsAuthoritativeLedgerWithoutLosingReferenceData() {
         Instant createdAt = Instant.parse("2026-08-11T12:00:00Z");
         Item item = Item.builder()
             .id(7L)
@@ -46,33 +46,34 @@ class StockMovementMapperTest {
             .build();
         StockMovement movement = StockMovement.builder()
             .id(42L)
-            .legacyAuditLogId(88L)
             .product(item)
-            .sourceType(MovementSourceType.GOODS_RECEIPT)
+            .sourceType(MovementSourceType.STOCK_ADJUSTMENT)
             .sourceId(99L)
             .movementType(MovementType.IN)
             .stockLocation(StockLocation.WAREHOUSE)
             .quantity(new BigDecimal("1.2500"))
             .qtyBefore(new BigDecimal("0.5000"))
             .qtyAfter(new BigDecimal("1.7500"))
-            .referenceNo("GR-0099")
-            .displayReference("GR-0099")
-            .effectiveAdjustmentActionType(StockAdjustmentActionType.ADD)
+            .referenceNo("SA-0099")
+            .adjustmentActionType(StockAdjustmentActionType.ADD)
             .createdBy("cashier")
             .createdAt(createdAt)
             .build();
 
         StockMovementResponse response = mapper.toResponse(movement);
-        ItemAuditLogResponse legacy = mapper.toAuditResponse(response);
 
         assertThat(response.getItem().getSku()).isEqualTo("SKU-7");
         assertThat(response.getLocation()).isEqualTo(StockLocation.WAREHOUSE);
-        assertThat(response.getReferenceNo()).isEqualTo("GR-0099");
+        assertThat(response.getReferenceNo()).isEqualTo("SA-0099");
         assertThat(response.getAdjustmentActionType()).isEqualTo(StockAdjustmentActionType.ADD);
-        assertThat(legacy.getId()).isEqualTo(88L);
-        assertThat(legacy.getSource()).isEqualTo(MovementSourceType.GOODS_RECEIPT);
-        assertThat(legacy.getQty()).isEqualByComparingTo("1.2500");
-        assertThat(legacy.getReferenceNo()).isEqualTo("GR-0099");
-        assertThat(legacy.getCreatedDate()).isEqualTo(createdAt);
+
+        ItemAuditLogResponse auditResponse = mapper.toAuditResponse(response);
+        assertThat(auditResponse.getId()).isEqualTo(42L);
+        assertThat(auditResponse.getItem().getSku()).isEqualTo("SKU-7");
+        assertThat(auditResponse.getSource()).isEqualTo(MovementSourceType.STOCK_ADJUSTMENT);
+        assertThat(auditResponse.getQty()).isEqualByComparingTo("1.2500");
+        assertThat(auditResponse.getQtyBefore()).isEqualByComparingTo("0.5000");
+        assertThat(auditResponse.getQtyAfter()).isEqualByComparingTo("1.7500");
+        assertThat(auditResponse.getCreatedDate()).isEqualTo(createdAt);
     }
 }

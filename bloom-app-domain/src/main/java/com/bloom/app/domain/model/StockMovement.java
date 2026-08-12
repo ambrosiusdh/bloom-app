@@ -12,7 +12,6 @@ import lombok.Setter;
 import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
-import org.hibernate.annotations.Formula;
 
 import java.time.Instant;
 import java.math.BigDecimal;
@@ -51,44 +50,12 @@ public class StockMovement {
     @Column(name = "source_id", nullable = false)
     private Long sourceId;
 
-    @Column(name = "reference_no", length = 100)
+    @Column(name = "reference_no", nullable = false, length = 100)
     private String referenceNo;
-
-    /**
-     * Reference exposed by read APIs. Pre-cutover rows use the verified compatibility snapshot.
-     */
-    @Formula("""
-        coalesce(reference_no, (
-            select link.reference_no
-            from stock_movement_legacy_audit_links link
-            where link.stock_movement_id = id))
-        """)
-    private String displayReference;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "adjustment_action_type")
     private StockAdjustmentActionType adjustmentActionType;
-
-    /**
-     * Exact adjustment action, snapshotted during the legacy reconciliation.
-     */
-    @Enumerated(EnumType.STRING)
-    @Formula("""
-        case when source_type = 'STOCK_ADJUSTMENT' then
-            coalesce(adjustment_action_type, (
-                select link.adjustment_action_type
-                from stock_movement_legacy_audit_links link
-                where link.stock_movement_id = id))
-        else null end
-        """)
-    private StockAdjustmentActionType effectiveAdjustmentActionType;
-
-    @Formula("""
-        (select link.item_audit_log_id
-         from stock_movement_legacy_audit_links link
-         where link.stock_movement_id = id)
-        """)
-    private Long legacyAuditLogId;
 
     @Column(name = "quantity", nullable = false, precision = 19, scale = 4)
     private BigDecimal quantity;

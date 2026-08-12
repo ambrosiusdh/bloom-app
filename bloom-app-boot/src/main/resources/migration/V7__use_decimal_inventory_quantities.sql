@@ -46,14 +46,3 @@ ALTER TABLE stock_movements
     ADD CONSTRAINT chk_stock_movements_quantity_positive CHECK (quantity > 0),
     ADD CONSTRAINT chk_stock_movements_qty_before_nonnegative CHECK (qty_before >= 0),
     ADD CONSTRAINT chk_stock_movements_qty_after_nonnegative CHECK (qty_after >= 0);
-
-ALTER TABLE item_audit_logs
-    ALTER COLUMN qty TYPE NUMERIC(19,4)
-        USING qty::NUMERIC(19,4),
-    ALTER COLUMN qty_before TYPE NUMERIC(19,4)
-        USING qty_before::NUMERIC(19,4),
-    ALTER COLUMN qty_after TYPE NUMERIC(19,4)
-        USING qty_after::NUMERIC(19,4),
-    ADD CONSTRAINT chk_item_audit_logs_qty_positive CHECK (qty > 0),
-    ADD CONSTRAINT chk_item_audit_logs_qty_before_nonnegative CHECK (qty_before >= 0),
-    ADD CONSTRAINT chk_item_audit_logs_qty_after_nonnegative CHECK (qty_after >= 0);

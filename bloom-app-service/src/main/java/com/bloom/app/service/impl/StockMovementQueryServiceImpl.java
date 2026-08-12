@@ -1,6 +1,7 @@
 package com.bloom.app.service.impl;
 
 import com.bloom.app.api.dto.request.stockmovement.FilterStockMovementRequest;
+import com.bloom.app.api.dto.response.auditlog.ItemAuditLogResponse;
 import com.bloom.app.api.dto.response.stockmovement.StockMovementResponse;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import com.bloom.app.service.StockMovementQueryService;
@@ -23,6 +24,12 @@ public class StockMovementQueryServiceImpl implements StockMovementQueryService 
     private static final Sort DEFAULT_SORT = Sort.by(
         Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
     private static final Map<String, String> SORT_PROPERTIES = sortProperties();
+    private static final Map<String, String> ITEM_AUDIT_SORT_PROPERTIES = Map.ofEntries(
+        Map.entry("item", "itemId"),
+        Map.entry("qty", "quantity"),
+        Map.entry("source", "sourceType"),
+        Map.entry("createdDate", "createdAt")
+    );
 
     private final StockMovementRepository stockMovementRepository;
     private final StockMovementMapper stockMovementMapper;
@@ -43,6 +50,29 @@ public class StockMovementQueryServiceImpl implements StockMovementQueryService 
         return stockMovementRepository.findAll(
                 StockMovementSpecification.filter(effectiveRequest), effectivePageable)
             .map(stockMovementMapper::toResponse);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<ItemAuditLogResponse> getItemAuditLogs(String sku, Pageable pageable) {
+        if (sku == null || sku.isBlank()) {
+            throw new IllegalArgumentException("Item SKU is required");
+        }
+        return filterMovements(
+            FilterStockMovementRequest.builder().itemSku(sku).build(),
+            translateItemAuditSort(pageable)
+        ).map(stockMovementMapper::toAuditResponse);
+    }
+
+    private Pageable translateItemAuditSort(Pageable pageable) {
+        Sort translated = Sort.unsorted();
+        for (Sort.Order order : pageable.getSort()) {
+            String property = ITEM_AUDIT_SORT_PROPERTIES.getOrDefault(
+                order.getProperty(), order.getProperty());
+            translated = translated.and(Sort.by(new Sort.Order(
+                order.getDirection(), property, order.getNullHandling())));
+        }
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), translated);
     }
 
     static Sort stableSort(Sort requestedSort) {
@@ -71,14 +101,14 @@ public class StockMovementQueryServiceImpl implements StockMovementQueryService 
         properties.put("createdAt", "createdAt");
         properties.put("sourceType", "sourceType");
         properties.put("movementType", "movementType");
-        properties.put("adjustmentActionType", "effectiveAdjustmentActionType");
+        properties.put("adjustmentActionType", "adjustmentActionType");
         properties.put("location", "stockLocation");
         properties.put("quantity", "quantity");
         properties.put("qtyBefore", "qtyBefore");
         properties.put("qtyAfter", "qtyAfter");
         properties.put("createdBy", "createdBy");
         properties.put("itemId", "product.id");
-        properties.put("referenceNo", "displayReference");
+        properties.put("referenceNo", "referenceNo");
         return Map.copyOf(properties);
     }
 }

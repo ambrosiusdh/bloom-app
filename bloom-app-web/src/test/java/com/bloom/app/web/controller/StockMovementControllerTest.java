@@ -94,4 +94,5 @@ class StockMovementControllerTest {
             .andExpect(jsonPath("$.code").value(400))
             .andExpect(jsonPath("$.message").value("startDate must not be after endDate"));
     }
+
 }

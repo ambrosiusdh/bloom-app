@@ -74,7 +74,7 @@ Every monetary value and every inventory quantity uses:
 This includes, at minimum:
 
 - `Item.price`, `Item.stockStore`, and `Item.stockWarehouse`
-- quantities and before/after balances in `SaleItem`, `GoodsReceiptItem`, `StockAdjustmentItem`, `StockMovement`, and `ItemAuditLog`
+- quantities and before/after balances in `SaleItem`, `GoodsReceiptItem`, `StockAdjustmentItem`, and `StockMovement`
 - purchase price, sale unit price, line subtotals, document subtotals, discounts, totals, payment amounts, expense amounts, and cash-session amounts
 
 Binary floating-point types (`float`, `double`, `REAL`, and `DOUBLE PRECISION`) must not represent money or inventory quantity.
@@ -323,7 +323,7 @@ These observations describe the repository at review time; they are not addition
 - Flyway is enabled and migrations are located under `bloom-app-boot/src/main/resources/migration`.
 - `V1__init-table.sql` currently mixes `DOUBLE PRECISION`, `NUMERIC(19,2)`, and integer quantities; it also defines a single `items.stock_quantity`.
 - The Java model already uses `stockStore` and `stockWarehouse` in `Item`, and `StockLocation` already contains exactly `STORE` and `WAREHOUSE`.
-- Current stock fields, movement quantities, sale quantities, goods-receipt quantities, adjustment quantities, and audit quantities are Java integer types and require later alignment to `BigDecimal`.
+- Current stock fields, movement quantities, sale quantities, goods-receipt quantities, and adjustment quantities are Java integer types and require later alignment to `BigDecimal`.
 - `StockMovementService` already centralizes sale, goods-receipt, and adjustment movements and prevents a negative result, but its interface and implementation currently use integer quantities.
 - Current item create/update DTOs allow stock balances to enter through item master-data requests. That conflicts with opening-balance movements and the rule that all stock mutation goes through `StockMovementService`.
 - The current Flyway baseline does not yet align with mapped columns such as the two stock locations and movement before/after/location fields, and does not define all mapped supplier, cash-session, and expense structures.

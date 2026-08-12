@@ -38,7 +38,7 @@ public final class StockMovementSpecification {
             }
             if (request.getAdjustmentActionType() != null) {
                 predicates.add(criteriaBuilder.equal(
-                    root.get("effectiveAdjustmentActionType"), request.getAdjustmentActionType()));
+                    root.get("adjustmentActionType"), request.getAdjustmentActionType()));
             }
             if (request.getLocation() != null) {
                 predicates.add(criteriaBuilder.equal(root.get("stockLocation"), request.getLocation()));
@@ -51,7 +51,7 @@ public final class StockMovementSpecification {
             }
             if (hasText(request.getReference())) {
                 predicates.add(criteriaBuilder.like(
-                    criteriaBuilder.lower(root.get("displayReference")),
+                    criteriaBuilder.lower(root.get("referenceNo")),
                     "%" + escapeLike(normalize(request.getReference())) + "%",
                     '\\'));
             }

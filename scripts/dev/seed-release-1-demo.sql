@@ -1,5 +1,5 @@
 -- Development-only Release 1 demonstration data for frontend testing.
--- Run manually after Flyway has migrated the database through V14.
+-- Run manually after Flyway has migrated the database through V12.
 -- This script is intentionally outside the production Flyway location.
 -- Demo login: kasir.demo / password
 -- The transaction-level guard makes accidental retries fail before any data changes.
