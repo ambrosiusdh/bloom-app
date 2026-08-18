@@ -12,6 +12,7 @@ import com.bloom.app.domain.model.StockAdjustmentItem;
 import com.bloom.app.domain.model.UnitOfMeasure;
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
+import com.bloom.app.domain.exception.FractionalQuantityPolicyImmutableException;
 import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.persistence.repository.ItemRepository;
@@ -22,6 +23,7 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -180,7 +182,8 @@ class StockMovementServiceImplTest {
         Item item = item(true, "1.0000");
         when(stockMovementRepository.existsByProductId(item.getId())).thenReturn(true);
 
-        assertThatThrownBy(() -> service.validateBaseUnitOfMeasureChange(item, UnitOfMeasure.LITER))
+        assertThatThrownBy(() -> service.validateMeasurementRuleChanges(
+            item, UnitOfMeasure.LITER, item.isFractionalQuantityAllowed()))
             .isInstanceOf(BaseUnitOfMeasureImmutableException.class)
             .hasMessageContaining("cannot change");
     }
@@ -190,9 +193,55 @@ class StockMovementServiceImplTest {
         Item item = item(true, "0.0000");
         when(stockMovementRepository.existsByProductId(item.getId())).thenReturn(false);
 
-        service.validateBaseUnitOfMeasureChange(item, UnitOfMeasure.LITER);
+        boolean hasStockMovements = service.validateMeasurementRuleChanges(
+            item, UnitOfMeasure.LITER, item.isFractionalQuantityAllowed());
 
+        assertThat(hasStockMovements).isFalse();
         verify(stockMovementRepository).existsByProductId(item.getId());
+    }
+
+    @Test
+    void preventsFractionalPolicyChangeAfterFirstMovement() {
+        Item item = item(true, "1.0000");
+        when(stockMovementRepository.existsByProductId(item.getId())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.validateMeasurementRuleChanges(
+            item, item.getBaseUnitOfMeasure(), false))
+            .isInstanceOf(FractionalQuantityPolicyImmutableException.class)
+            .hasMessageContaining("cannot change");
+    }
+
+    @Test
+    void allowsFractionalPolicyChangeBeforeFirstMovement() {
+        Item item = item(false, "0.0000");
+        when(stockMovementRepository.existsByProductId(item.getId())).thenReturn(false);
+
+        boolean hasStockMovements = service.validateMeasurementRuleChanges(
+            item, item.getBaseUnitOfMeasure(), true);
+
+        assertThat(hasStockMovements).isFalse();
+    }
+
+    @Test
+    void acceptsUnchangedMeasurementRulesAfterMovement() {
+        Item item = item(true, "1.0000");
+        when(stockMovementRepository.existsByProductId(item.getId())).thenReturn(true);
+
+        boolean hasStockMovements = service.validateMeasurementRuleChanges(
+            item, item.getBaseUnitOfMeasure(), true);
+
+        assertThat(hasStockMovements).isTrue();
+    }
+
+    @Test
+    void findsMovementStateForItemPageInOneBatchRepositoryCall() {
+        when(stockMovementRepository.findProductIdsWithMovements(List.of(1L, 2L, 3L)))
+            .thenReturn(Set.of(1L, 3L));
+
+        Set<Long> result = service.findItemIdsWithStockMovements(List.of(1L, 2L, 3L));
+
+        assertThat(result).containsExactlyInAnyOrder(1L, 3L);
+        verify(stockMovementRepository).findProductIdsWithMovements(List.of(1L, 2L, 3L));
     }
 
     private Item item(boolean fractionalQuantityAllowed, String storeStock) {

@@ -33,6 +33,7 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import java.util.List;
 import java.util.Map;
 import java.math.BigDecimal;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -73,7 +74,8 @@ public class ItemServiceImpl implements ItemService {
         Item savedItem = itemRepository.saveAndFlush(item);
         recordOpeningBalance(savedItem, openingStore, StockLocation.STORE);
         recordOpeningBalance(savedItem, openingWarehouse, StockLocation.WAREHOUSE);
-        return itemMapper.itemToItemResponse(savedItem);
+        boolean hasStockMovements = openingStore.signum() > 0 || openingWarehouse.signum() > 0;
+        return itemMapper.itemToItemResponse(savedItem, hasStockMovements);
     }
 
     @Override
@@ -82,12 +84,16 @@ public class ItemServiceImpl implements ItemService {
         log.debug("ItemService updateItem using request: {}", request);
         Item item = itemRepository.findItemBySku(sku)
             .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
-        stockMovementService.validateBaseUnitOfMeasureChange(item, request.getBaseUnitOfMeasure());
+        boolean hasStockMovements = stockMovementService.validateMeasurementRuleChanges(
+            item,
+            request.getBaseUnitOfMeasure(),
+            request.getFractionalQuantityAllowed()
+        );
         itemMapper.updateRequestToEntity(request, item);
         InventoryQuantityValidator.validateStock(item.getStockStore(), item.isFractionalQuantityAllowed());
         InventoryQuantityValidator.validateStock(item.getStockWarehouse(), item.isFractionalQuantityAllowed());
         try {
-            return itemMapper.itemToItemResponse(itemRepository.saveAndFlush(item));
+            return itemMapper.itemToItemResponse(itemRepository.saveAndFlush(item), hasStockMovements);
         } catch (OptimisticLockingFailureException exception) {
             throw new StockConcurrencyException(item.getSku(), exception);
         }
@@ -106,10 +112,16 @@ public class ItemServiceImpl implements ItemService {
     @Override
     public Page<ItemResponse> filterItems(FilterItemRequest request, Pageable pageable) {
         Page<Item> itemPage = itemRepository.findAll(ItemSpecification.filter(request), pageable);
+        Set<Long> itemIdsWithStockMovements = stockMovementService.findItemIdsWithStockMovements(
+            itemPage.getContent().stream().map(Item::getId).toList()
+        );
 
         List<ItemResponse> itemResponseList = itemPage.getContent()
             .stream()
-            .map(itemMapper::itemToItemResponse)
+            .map(item -> itemMapper.itemToItemResponse(
+                item,
+                itemIdsWithStockMovements.contains(item.getId())
+            ))
             .toList();
 
         return new PageImpl<>(itemResponseList, pageable, itemPage.getTotalElements());
@@ -118,9 +130,10 @@ public class ItemServiceImpl implements ItemService {
     @Override
     public ItemResponse getItemDetails(String sku) {
         log.debug("ItemService getItemDetails using request: {}", sku);
-        return itemRepository.findItemBySku(sku)
-            .map(itemMapper::itemToItemResponse)
+        Item item = itemRepository.findItemBySku(sku)
             .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
+        boolean hasStockMovements = stockMovementService.hasStockMovements(item.getId());
+        return itemMapper.itemToItemResponse(item, hasStockMovements);
     }
 
     @Transactional
