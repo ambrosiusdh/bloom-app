@@ -4,6 +4,8 @@ import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
 import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.exception.IdempotencyConflictException;
+import com.bloom.app.domain.exception.CashMovementIdempotencyConflictException;
+import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import jakarta.validation.ConstraintViolationException;
@@ -96,7 +98,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
         StockConcurrencyException.class,
         BaseUnitOfMeasureImmutableException.class,
-        IdempotencyConflictException.class
+        IdempotencyConflictException.class,
+        CashMovementIdempotencyConflictException.class,
+        CashSessionConflictException.class
     })
     public ResponseEntity<?> handleInventoryConflict(RuntimeException ex) {
         return domainError(ex, HttpStatus.CONFLICT);

@@ -26,25 +26,35 @@ public class CashSession {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    @JoinColumn(name = "opened_by_id", nullable = false, updatable = false)
+    private User openedBy;
 
-    @Column(name = "opening_cash", nullable = false, precision = 19, scale = 4)
+    @Column(name = "opening_cash", nullable = false, precision = 19, scale = 4, updatable = false)
     private BigDecimal openingCash;
 
-    @Column(name = "closing_cash", precision = 19, scale = 4)
-    private BigDecimal closingCash;
+    @Column(name = "expected_closing_cash", nullable = false, precision = 19, scale = 4)
+    private BigDecimal expectedClosingCash;
+
+    @Column(name = "actual_closing_cash", precision = 19, scale = 4)
+    private BigDecimal actualClosingCash;
+
+    @Column(precision = 19, scale = 4)
+    private BigDecimal difference;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Builder.Default
     private CashSessionStatus status = CashSessionStatus.OPEN;
 
-    @Column(name = "opened_at", nullable = false)
+    @Column(name = "opened_at", nullable = false, updatable = false)
     private Instant openedAt;
 
     @Column(name = "closed_at")
     private Instant closedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "closed_by_id")
+    private User closedBy;
 
     @Version
     private Long version;
