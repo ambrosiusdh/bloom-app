@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.exception.IdempotencyConflictException;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import com.bloom.app.domain.exception.FractionalQuantityPolicyImmutableException;
 
 import java.util.Map;
@@ -39,7 +40,7 @@ class GlobalExceptionHandlerTest {
         StockConcurrencyException exception = new StockConcurrencyException(
             "ITEM-1", new ObjectOptimisticLockingFailureException(Object.class, 42L));
 
-        var response = handler.handleInventoryConflict(exception);
+        var response = handler.handleDomainConflict(exception);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         Map<?, ?> body = (Map<?, ?>) response.getBody();
@@ -50,7 +51,7 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void returnsConflictForReusedIdempotencyKeyWithDifferentPayload() {
-        var response = handler.handleInventoryConflict(new IdempotencyConflictException());
+        var response = handler.handleDomainConflict(new IdempotencyConflictException());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         Map<?, ?> body = (Map<?, ?>) response.getBody();
@@ -62,7 +63,7 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void returnsConflictForFractionalQuantityPolicyChangeAfterMovement() {
-        var response = handler.handleInventoryConflict(
+        var response = handler.handleDomainConflict(
             new FractionalQuantityPolicyImmutableException("ITEM-1"));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
@@ -83,5 +84,17 @@ class GlobalExceptionHandlerTest {
         Map<?, ?> body = (Map<?, ?>) response.getBody();
         assertThat(body.get("code")).isEqualTo(HttpStatus.BAD_REQUEST.value());
         assertThat(body.get("errorType")).isEqualTo("IllegalArgumentException");
+    }
+
+    @Test
+    void returnsUnauthorizedWhenAuthenticatedActorIsUnavailable() {
+        var response = handler.handleAuthenticationException(
+            new AuthenticationCredentialsNotFoundException("Account unavailable"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        Map<?, ?> body = (Map<?, ?>) response.getBody();
+        assertThat(body.get("code")).isEqualTo(HttpStatus.UNAUTHORIZED.value());
+        assertThat(body.get("errorType"))
+            .isEqualTo("AuthenticationCredentialsNotFoundException");
     }
 }

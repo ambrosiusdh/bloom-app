@@ -5,12 +5,15 @@ import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
 import com.bloom.app.domain.exception.FractionalQuantityPolicyImmutableException;
 import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.exception.IdempotencyConflictException;
+import com.bloom.app.domain.exception.CashMovementIdempotencyConflictException;
+import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -98,10 +101,17 @@ public class GlobalExceptionHandler {
         StockConcurrencyException.class,
         BaseUnitOfMeasureImmutableException.class,
         FractionalQuantityPolicyImmutableException.class,
-        IdempotencyConflictException.class
+        IdempotencyConflictException.class,
+        CashMovementIdempotencyConflictException.class,
+        CashSessionConflictException.class
     })
-    public ResponseEntity<?> handleInventoryConflict(RuntimeException ex) {
+    public ResponseEntity<?> handleDomainConflict(RuntimeException ex) {
         return domainError(ex, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<?> handleAuthenticationException(AuthenticationException ex) {
+        return domainError(ex, HttpStatus.UNAUTHORIZED);
     }
 
     @ExceptionHandler(ConstraintViolationException.class)

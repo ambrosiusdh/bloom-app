@@ -160,7 +160,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsBaselineStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("12");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("13");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
@@ -188,10 +188,16 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(columnExists("items", "stock_quantity")).isTrue();
         assertThat(tableExists("suppliers")).isTrue();
         assertThat(tableExists("cash_sessions")).isTrue();
+        assertThat(tableExists("cash_movements")).isTrue();
         assertThat(tableExists("expenses")).isTrue();
         assertThat(tableExists("stock_transfers")).isTrue();
         assertThat(tableExists("stock_transfer_lines")).isTrue();
         assertThat(columnExists("cash_sessions", "version")).isTrue();
+        assertThat(columnExists("cash_sessions", "opened_by_id")).isTrue();
+        assertThat(columnExists("cash_sessions", "closed_by_id")).isTrue();
+        assertThat(columnExists("cash_sessions", "expected_closing_cash")).isTrue();
+        assertThat(columnExists("cash_sessions", "actual_closing_cash")).isTrue();
+        assertThat(columnExists("cash_sessions", "difference")).isTrue();
         assertThat(columnExists("expenses", "version")).isTrue();
         assertThat(columnExists("item_category_counters", "version")).isFalse();
         assertThat(constraintExists(
@@ -216,6 +222,8 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(indexExists("idx_stock_transfer_lines_item_transfer")).isTrue();
         assertThat(indexExists("idx_stock_movements_history_order")).isTrue();
         assertThat(indexExists("idx_stock_movements_product_history")).isTrue();
+        assertThat(indexExists("uq_cash_sessions_single_open")).isTrue();
+        assertThat(indexExists("uq_cash_movements_idempotency_key")).isTrue();
 
         assertThat(numericScale("items", "price")).isEqualTo(4);
         assertThat(numericScale("sales", "subtotal_amount")).isEqualTo(4);
@@ -228,7 +236,10 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(numericScale("goods_receipts", "paid_amount")).isEqualTo(4);
         assertThat(numericScale("goods_receipt_items", "purchase_price")).isEqualTo(4);
         assertThat(numericScale("cash_sessions", "opening_cash")).isEqualTo(4);
-        assertThat(numericScale("cash_sessions", "closing_cash")).isEqualTo(4);
+        assertThat(numericScale("cash_sessions", "expected_closing_cash")).isEqualTo(4);
+        assertThat(numericScale("cash_sessions", "actual_closing_cash")).isEqualTo(4);
+        assertThat(numericScale("cash_sessions", "difference")).isEqualTo(4);
+        assertThat(numericScale("cash_movements", "amount")).isEqualTo(4);
         assertThat(numericScale("expenses", "amount")).isEqualTo(4);
         assertThat(numericScale("items", "stock_quantity")).isEqualTo(4);
         assertThat(numericScale("items", "stock_store")).isEqualTo(4);
@@ -328,18 +339,23 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void enforcesSingleGlobalOpenCashSessionAndRequiredExpenseSession() {
+        closeAnyOpenCashSession();
         assertThat(columnIsNullable("expenses", "cash_session_id")).isFalse();
 
         jdbcTemplate.update("""
-            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at, version)
-            VALUES (1, 100.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
+            INSERT INTO cash_sessions (
+                opened_by_id, opening_cash, expected_closing_cash, status, opened_at, version
+            ) VALUES (1, 100.0000, 100.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
             """);
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
-            INSERT INTO cash_sessions (user_id, opening_cash, status, opened_at, version)
-            VALUES (1, 200.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
+            INSERT INTO cash_sessions (
+                opened_by_id, opening_cash, expected_closing_cash, status, opened_at, version
+            ) VALUES (1, 200.0000, 200.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
             """))
             .isInstanceOf(DataIntegrityViolationException.class);
+
+        closeAnyOpenCashSession();
     }
 
     @Test
@@ -1073,6 +1089,19 @@ class PostgreSqlMigrationAndContextTest {
             .quantity(new BigDecimal(quantity))
             .unitOfMeasure(UnitOfMeasure.PIECE)
             .build();
+    }
+
+    private void closeAnyOpenCashSession() {
+        jdbcTemplate.update("""
+            UPDATE cash_sessions
+            SET status = 'CLOSED',
+                actual_closing_cash = expected_closing_cash,
+                difference = 0.0000,
+                closed_at = CURRENT_TIMESTAMP,
+                closed_by_id = opened_by_id,
+                version = version + 1
+            WHERE status = 'OPEN'
+            """);
     }
 
     private static PostgreSQLContainer<?> startPostgresWhenRequired() {
