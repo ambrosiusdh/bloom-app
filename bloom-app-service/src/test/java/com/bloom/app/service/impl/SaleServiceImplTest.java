@@ -208,7 +208,10 @@ class SaleServiceImplTest {
         assertThat(service.createSale("checkout-retry", request)).isSameAs(response);
         when(saleRepository.findByCheckoutIdempotencyKey("checkout-retry"))
             .thenReturn(Optional.of(sale));
-        assertThat(service.createSale("checkout-retry", request)).isSameAs(response);
+        CreateSaleRequest equivalentScaleVariant = saleRequest(
+            new BigDecimal("10.0"), new BigDecimal("0.000"),
+            line("ITEM-1", "1.00", StockLocation.STORE));
+        assertThat(service.createSale("checkout-retry", equivalentScaleVariant)).isSameAs(response);
 
         verify(saleRepository, times(1)).saveAndFlush(sale);
         verify(stockMovementService, times(1)).recordSaleMovements(sale);
@@ -292,17 +295,17 @@ class SaleServiceImplTest {
     }
 
     @Test
-    void loadsDistinctSaleItemsInOneRepositoryQuery() {
+    void delegatesDistinctItemLockOrderingToOneRepositoryQuery() {
         Item firstItem = item("ITEM-1", "2.0000", "1.0000", "0.0000", true);
         Item secondItem = item("ITEM-2", "3.0000", "1.0000", "0.0000", true);
         CreateSaleRequest request = saleRequest(
             new BigDecimal("5.0000"), BigDecimal.ZERO,
-            line("ITEM-1", "1.0000", StockLocation.STORE),
-            line("ITEM-2", "1.0000", StockLocation.STORE));
+            line("ITEM-2", "1.0000", StockLocation.STORE),
+            line("ITEM-1", "1.0000", StockLocation.STORE));
         Sale sale = Sale.builder().build();
 
         when(saleMapper.createRequestToEntity(request)).thenReturn(sale);
-        when(itemRepository.findBySkuInOrderByIdForUpdate(List.of("ITEM-1", "ITEM-2")))
+        when(itemRepository.findBySkuInOrderByIdForUpdate(List.of("ITEM-2", "ITEM-1")))
             .thenReturn(List.of(firstItem, secondItem));
         when(documentCounterService.generateNextCode(DocumentType.SALE)).thenReturn("SALE-1");
         when(saleRepository.saveAndFlush(sale)).thenAnswer(invocation -> {
@@ -313,7 +316,7 @@ class SaleServiceImplTest {
         service.createSale("checkout-batch", request);
 
         assertThat(sale.getItems()).hasSize(2);
-        verify(itemRepository).findBySkuInOrderByIdForUpdate(List.of("ITEM-1", "ITEM-2"));
+        verify(itemRepository).findBySkuInOrderByIdForUpdate(List.of("ITEM-2", "ITEM-1"));
     }
 
     private CreateSaleRequest saleRequest(

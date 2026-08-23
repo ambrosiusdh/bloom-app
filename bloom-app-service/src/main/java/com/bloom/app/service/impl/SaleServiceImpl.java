@@ -214,8 +214,7 @@ public class SaleServiceImpl implements SaleService {
         }
 
         Map<String, Item> itemsBySku = new LinkedHashMap<>();
-        List<String> sortedSkus = requestedSkus.stream().sorted().toList();
-        itemRepository.findBySkuInOrderByIdForUpdate(sortedSkus)
+        itemRepository.findBySkuInOrderByIdForUpdate(List.copyOf(requestedSkus))
             .forEach(item -> itemsBySku.put(item.getSku(), item));
         for (String sku : requestedSkus) {
             if (!itemsBySku.containsKey(sku)) {
