@@ -1,10 +1,10 @@
 package com.bloom.app.service.support;
 
-import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.User;
 import com.bloom.app.persistence.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
@@ -17,7 +17,8 @@ public class CurrentActorProvider {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated()
                 || "anonymousUser".equals(authentication.getPrincipal())) {
-            throw new IllegalStateException("An authenticated user is required");
+            throw new AuthenticationCredentialsNotFoundException(
+                "An authenticated user is required");
         }
         return authentication.getName();
     }
@@ -25,7 +26,7 @@ public class CurrentActorProvider {
     public User user() {
         String username = username();
         return userRepository.findByUsername(username)
-            .orElseThrow(() -> new ResourceNotFoundException(
-                "Authenticated user not found: " + username));
+            .orElseThrow(() -> new AuthenticationCredentialsNotFoundException(
+                "The authenticated account is unavailable"));
     }
 }

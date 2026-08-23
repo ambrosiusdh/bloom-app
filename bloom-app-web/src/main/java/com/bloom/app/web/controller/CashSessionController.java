@@ -4,7 +4,9 @@ import com.bloom.app.api.dto.request.cashsession.CloseCashSessionRequest;
 import com.bloom.app.api.dto.request.cashsession.OpenCashSessionRequest;
 import com.bloom.app.api.dto.response.ApiResponse;
 import com.bloom.app.api.dto.response.cashsession.CashReconciliationResponse;
+import com.bloom.app.api.dto.response.cashsession.CashMovementResponse;
 import com.bloom.app.api.dto.response.cashsession.CashSessionResponse;
+import com.bloom.app.api.helper.PagingHelper;
 import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.service.CashSessionService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -12,6 +14,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -42,10 +46,19 @@ public class CashSessionController {
     }
 
     @GetMapping("/{sessionId}")
-    @Operation(summary = "Get cash session details and its immutable ledger")
+    @Operation(summary = "Get cash session details")
     public ResponseEntity<ApiResponse<CashSessionResponse>> getSessionDetails(
             @PathVariable @Positive Long sessionId) {
         return ResponseHelper.ok(cashSessionService.getSessionDetails(sessionId));
+    }
+
+    @GetMapping("/{sessionId}/movements")
+    @Operation(summary = "Get a paginated cash movement ledger")
+    public ResponseEntity<ApiResponse<Page<CashMovementResponse>>> getSessionMovements(
+            @PathVariable @Positive Long sessionId,
+            Pageable pageable) {
+        return ResponseHelper.ok(cashSessionService.getSessionMovements(
+            sessionId, PagingHelper.toPageRequest(pageable)));
     }
 
     @GetMapping("/{sessionId}/expected-cash")

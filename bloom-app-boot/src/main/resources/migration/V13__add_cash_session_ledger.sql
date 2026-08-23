@@ -37,6 +37,11 @@ ALTER TABLE cash_sessions
         CHECK (opening_cash >= 0),
     ADD CONSTRAINT chk_cash_sessions_actual_cash_non_negative
         CHECK (actual_closing_cash IS NULL OR actual_closing_cash >= 0),
+    ADD CONSTRAINT chk_cash_sessions_difference
+        CHECK (
+            status <> 'CLOSED'
+            OR difference = actual_closing_cash - expected_closing_cash
+        ),
     ADD CONSTRAINT chk_cash_sessions_status
         CHECK (status IN ('OPEN', 'CLOSED')),
     ADD CONSTRAINT chk_cash_sessions_lifecycle
@@ -73,13 +78,15 @@ CREATE TABLE cash_movements (
     reference_no VARCHAR(100) NOT NULL,
     amount NUMERIC(19, 4) NOT NULL,
     direction VARCHAR(10) NOT NULL,
-    occurred_at TIMESTAMP NOT NULL,
+    recorded_at TIMESTAMP NOT NULL,
     actor VARCHAR(255) NOT NULL,
-    idempotency_key VARCHAR(100),
+    idempotency_key VARCHAR(100) NOT NULL,
     CONSTRAINT fk_cash_movements_session
         FOREIGN KEY (cash_session_id) REFERENCES cash_sessions(id),
     CONSTRAINT chk_cash_movements_amount_positive
         CHECK (amount > 0),
+    CONSTRAINT chk_cash_movements_source_id_positive
+        CHECK (source_id > 0),
     CONSTRAINT chk_cash_movements_direction
         CHECK (direction IN ('IN', 'OUT')),
     CONSTRAINT chk_cash_movements_type
@@ -98,14 +105,13 @@ CREATE TABLE cash_movements (
 );
 
 CREATE INDEX idx_cash_movements_session_time
-    ON cash_movements(cash_session_id, occurred_at, id);
+    ON cash_movements(cash_session_id, recorded_at, id);
 
 CREATE INDEX idx_cash_movements_source
     ON cash_movements(source_type, source_id);
 
 CREATE UNIQUE INDEX uq_cash_movements_idempotency_key
-    ON cash_movements(idempotency_key)
-    WHERE idempotency_key IS NOT NULL;
+    ON cash_movements(idempotency_key);
 
 CREATE OR REPLACE FUNCTION require_open_cash_session_for_movement()
 RETURNS trigger
@@ -145,3 +151,23 @@ CREATE TRIGGER trg_cash_movements_immutable
 BEFORE UPDATE OR DELETE ON cash_movements
 FOR EACH ROW
 EXECUTE FUNCTION reject_cash_movement_mutation();
+
+CREATE OR REPLACE FUNCTION reject_closed_cash_session_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF OLD.status = 'CLOSED' THEN
+        RAISE EXCEPTION 'closed cash sessions are immutable';
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_closed_cash_sessions_immutable
+BEFORE UPDATE OR DELETE ON cash_sessions
+FOR EACH ROW
+EXECUTE FUNCTION reject_closed_cash_session_mutation();

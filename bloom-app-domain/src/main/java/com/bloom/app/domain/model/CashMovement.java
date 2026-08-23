@@ -20,7 +20,6 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.Immutable;
-import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
@@ -66,13 +65,12 @@ public class CashMovement {
     private CashMovementDirection direction;
 
     @CreatedDate
-    @Column(name = "occurred_at", nullable = false, updatable = false)
-    private Instant occurredAt;
+    @Column(name = "recorded_at", nullable = false, updatable = false)
+    private Instant recordedAt;
 
-    @CreatedBy
     @Column(nullable = false, updatable = false)
     private String actor;
 
-    @Column(name = "idempotency_key", length = 100, updatable = false)
+    @Column(name = "idempotency_key", nullable = false, length = 100, updatable = false)
     private String idempotencyKey;
 }

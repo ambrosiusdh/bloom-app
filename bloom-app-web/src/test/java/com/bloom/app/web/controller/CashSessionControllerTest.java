@@ -1,6 +1,7 @@
 package com.bloom.app.web.controller;
 
 import com.bloom.app.api.dto.response.cashsession.CashReconciliationResponse;
+import com.bloom.app.api.dto.response.cashsession.CashMovementResponse;
 import com.bloom.app.api.dto.response.cashsession.CashSessionResponse;
 import com.bloom.app.api.exception.GlobalExceptionHandler;
 import com.bloom.app.domain.enums.CashSessionStatus;
@@ -9,13 +10,19 @@ import com.bloom.app.service.CashSessionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -33,6 +40,7 @@ class CashSessionControllerTest {
         mockMvc = MockMvcBuilders
             .standaloneSetup(new CashSessionController(cashSessionService))
             .setControllerAdvice(new GlobalExceptionHandler())
+            .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
             .build();
     }
 
@@ -69,6 +77,28 @@ class CashSessionControllerTest {
         mockMvc.perform(get("/api/cash-sessions/7/expected-cash"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.expectedClosingCash").value(130.0));
+    }
+
+    @Test
+    void returnsMovementsUsingExistingOneBasedPaginationConvention() throws Exception {
+        CashMovementResponse movement = CashMovementResponse.builder()
+            .id(99L)
+            .referenceNo("SALE-99")
+            .recordedAt(Instant.parse("2026-08-18T01:00:00Z"))
+            .build();
+        when(cashSessionService.getSessionMovements(eq(7L), any())).thenReturn(
+            new PageImpl<>(List.of(movement), PageRequest.of(1, 1), 2));
+
+        mockMvc.perform(get("/api/cash-sessions/7/movements")
+                .param("page", "2")
+                .param("size", "1"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.content[0].id").value(99))
+            .andExpect(jsonPath("$.data.totalElements").value(2));
+
+        org.mockito.Mockito.verify(cashSessionService).getSessionMovements(
+            eq(7L), argThat(pageable -> pageable.getPageNumber() == 1
+                && pageable.getPageSize() == 1));
     }
 
     @Test

@@ -23,7 +23,6 @@ public class CashMovementResponse {
     private String referenceNo;
     private BigDecimal amount;
     private CashMovementDirection direction;
-    private Instant occurredAt;
+    private Instant recordedAt;
     private String actor;
-    private String idempotencyKey;
 }

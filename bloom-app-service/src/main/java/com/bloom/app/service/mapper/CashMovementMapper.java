@@ -15,9 +15,8 @@ public class CashMovementMapper {
             .referenceNo(movement.getReferenceNo())
             .amount(movement.getAmount())
             .direction(movement.getDirection())
-            .occurredAt(movement.getOccurredAt())
+            .recordedAt(movement.getRecordedAt())
             .actor(movement.getActor())
-            .idempotencyKey(movement.getIdempotencyKey())
             .build();
     }
 }

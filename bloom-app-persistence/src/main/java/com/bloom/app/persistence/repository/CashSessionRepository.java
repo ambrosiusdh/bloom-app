@@ -15,8 +15,8 @@ import java.util.Optional;
 
 @Repository
 public interface CashSessionRepository extends JpaRepository<CashSession, Long>, JpaSpecificationExecutor<CashSession> {
-    @Query(value = "SELECT pg_advisory_xact_lock(67294367138521)", nativeQuery = true)
-    void lockGlobalSessionTransition();
+    @Query(value = "SELECT pg_advisory_xact_lock(:lockId)", nativeQuery = true)
+    void lockGlobalSessionTransition(@Param("lockId") long lockId);
 
     @EntityGraph(attributePaths = {"openedBy", "closedBy"})
     Optional<CashSession> findFirstByStatus(CashSessionStatus status);

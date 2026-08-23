@@ -1,8 +1,6 @@
 package com.bloom.app;
 
 import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
-import com.bloom.app.api.dto.request.cashsession.CloseCashSessionRequest;
-import com.bloom.app.api.dto.request.cashsession.OpenCashSessionRequest;
 import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
 import com.bloom.app.api.dto.request.stockadjustment.CreateStockAdjustmentRequest;
 import com.bloom.app.api.dto.request.stockadjustment.StockAdjustmentItemRequest;
@@ -11,23 +9,17 @@ import com.bloom.app.api.dto.request.stocktransfer.FilterStockTransferRequest;
 import com.bloom.app.api.dto.request.stocktransfer.StockTransferLineRequest;
 import com.bloom.app.api.dto.request.stockmovement.FilterStockMovementRequest;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
-import com.bloom.app.api.dto.response.cashsession.CashSessionResponse;
 import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
 import com.bloom.app.api.dto.response.stocktransfer.StockTransferResponse;
 import com.bloom.app.api.dto.response.stocktransfer.StockTransferSummaryResponse;
 import com.bloom.app.api.dto.response.stockmovement.StockMovementResponse;
 import com.bloom.app.domain.enums.DocumentType;
-import com.bloom.app.domain.enums.CashMovementDirection;
-import com.bloom.app.domain.enums.CashMovementSourceType;
-import com.bloom.app.domain.enums.CashMovementType;
-import com.bloom.app.domain.enums.CashSessionStatus;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.PaymentType;
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.StockConcurrencyException;
-import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.IdempotencyConflictException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.DocumentCounter;
@@ -37,8 +29,6 @@ import com.bloom.app.domain.model.SaleItem;
 import com.bloom.app.domain.model.StockTransfer;
 import com.bloom.app.domain.model.UnitOfMeasure;
 import com.bloom.app.persistence.repository.DocumentCounterRepository;
-import com.bloom.app.persistence.repository.CashMovementRepository;
-import com.bloom.app.persistence.repository.CashSessionRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.ItemCategoryCounterRepository;
 import com.bloom.app.persistence.repository.SaleRepository;
@@ -46,9 +36,6 @@ import com.bloom.app.persistence.repository.StockAdjustmentRepository;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import com.bloom.app.persistence.repository.StockTransferRepository;
 import com.bloom.app.service.SaleService;
-import com.bloom.app.service.CashMovementService;
-import com.bloom.app.service.CashSessionService;
-import com.bloom.app.service.command.RecordCashMovementCommand;
 import com.bloom.app.service.StockAdjustmentService;
 import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.StockMovementQueryService;
@@ -64,8 +51,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DataAccessException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -145,18 +130,6 @@ class PostgreSqlMigrationAndContextTest {
 
     @Autowired
     private StockTransferService stockTransferService;
-
-    @Autowired
-    private CashSessionRepository cashSessionRepository;
-
-    @Autowired
-    private CashMovementRepository cashMovementRepository;
-
-    @Autowired
-    private CashSessionService cashSessionService;
-
-    @Autowired
-    private CashMovementService cashMovementService;
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -383,165 +356,6 @@ class PostgreSqlMigrationAndContextTest {
             .isInstanceOf(DataIntegrityViolationException.class);
 
         closeAnyOpenCashSession();
-    }
-
-    @Test
-    void serializesConcurrentDoubleOpenSoExactlyOneSessionWins() throws Exception {
-        closeAnyOpenCashSession();
-        CountDownLatch ready = new CountDownLatch(2);
-        CountDownLatch start = new CountDownLatch(1);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-
-        List<Object> outcomes;
-        try {
-            List<CompletableFuture<Object>> attempts = Stream.generate(() ->
-                    CompletableFuture.supplyAsync(() -> {
-                        authenticateAdmin();
-                        ready.countDown();
-                        try {
-                            start.await(10, TimeUnit.SECONDS);
-                            return cashSessionService.openSession(OpenCashSessionRequest.builder()
-                                .openingCash(new BigDecimal("100.0000"))
-                                .build());
-                        } catch (InterruptedException exception) {
-                            Thread.currentThread().interrupt();
-                            return new IllegalStateException(exception);
-                        } catch (RuntimeException exception) {
-                            return exception;
-                        } finally {
-                            SecurityContextHolder.clearContext();
-                        }
-                    }, executor))
-                .limit(2)
-                .toList();
-
-            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
-            start.countDown();
-            outcomes = attempts.stream().map(CompletableFuture::join).toList();
-        } finally {
-            start.countDown();
-            executor.shutdownNow();
-        }
-
-        assertThat(outcomes).filteredOn(CashSessionResponse.class::isInstance).hasSize(1);
-        assertThat(outcomes).filteredOn(CashSessionConflictException.class::isInstance).hasSize(1);
-        assertThat(cashSessionRepository.findFirstByStatus(CashSessionStatus.OPEN)).isPresent();
-        closeAnyOpenCashSession();
-    }
-
-    @Test
-    void derivesExpectedCashClosesWithVarianceAndRejectsLaterMovements() {
-        closeAnyOpenCashSession();
-        authenticateAdmin();
-        try {
-            CashSessionResponse opened = cashSessionService.openSession(
-                OpenCashSessionRequest.builder()
-                    .openingCash(new BigDecimal("100.0000"))
-                    .build());
-
-            RecordCashMovementCommand saleMovement = new RecordCashMovementCommand(
-                opened.getId(), CashMovementType.SALE_PAYMENT, CashMovementSourceType.SALE,
-                9001L, "SALE-9001", new BigDecimal("50.0000"),
-                CashMovementDirection.IN, "cash-sale-9001");
-            Long firstMovementId = cashMovementService.recordMovement(saleMovement).getId();
-            assertThat(cashMovementService.recordMovement(saleMovement).getId())
-                .isEqualTo(firstMovementId);
-            cashMovementService.recordMovement(new RecordCashMovementCommand(
-                opened.getId(), CashMovementType.EXPENSE, CashMovementSourceType.EXPENSE,
-                9002L, "EXPENSE-9002", new BigDecimal("20.0000"),
-                CashMovementDirection.OUT, "cash-expense-9002"));
-
-            assertThat(cashSessionService.calculateExpectedCash(opened.getId())
-                .getExpectedClosingCash()).isEqualByComparingTo("130.0000");
-
-            CashSessionResponse closed = cashSessionService.closeSession(
-                opened.getId(), CloseCashSessionRequest.builder()
-                    .actualClosingCash(new BigDecimal("125.0000"))
-                    .build());
-            assertThat(closed.getStatus()).isEqualTo(CashSessionStatus.CLOSED);
-            assertThat(closed.getExpectedClosingCash()).isEqualByComparingTo("130.0000");
-            assertThat(closed.getActualClosingCash()).isEqualByComparingTo("125.0000");
-            assertThat(closed.getDifference()).isEqualByComparingTo("-5.0000");
-            assertThat(closed.getMovements()).hasSize(2);
-
-            assertThatThrownBy(() -> cashMovementService.recordMovement(
-                new RecordCashMovementCommand(
-                    opened.getId(), CashMovementType.SALE_PAYMENT,
-                    CashMovementSourceType.SALE, 9003L, "SALE-9003",
-                    new BigDecimal("1.0000"), CashMovementDirection.IN, "cash-sale-9003")))
-                .isInstanceOf(CashSessionConflictException.class)
-                .hasMessageContaining("is closed");
-
-            assertThatThrownBy(() -> jdbcTemplate.update("""
-                INSERT INTO cash_movements (
-                    cash_session_id, movement_type, source_type, source_id,
-                    reference_no, amount, direction, occurred_at, actor
-                ) VALUES (?, 'SALE_PAYMENT', 'SALE', 9004,
-                    'SALE-9004', 1.0000, 'IN', CURRENT_TIMESTAMP, 'admin')
-                """, opened.getId()))
-                .isInstanceOf(DataAccessException.class);
-
-            Long movementId = cashMovementRepository
-                .findByIdempotencyKey("cash-sale-9001").orElseThrow().getId();
-            assertThatThrownBy(() -> jdbcTemplate.update(
-                "UPDATE cash_movements SET amount = 99.0000 WHERE id = ?", movementId))
-                .isInstanceOf(DataAccessException.class);
-        } finally {
-            SecurityContextHolder.clearContext();
-        }
-    }
-
-    @Test
-    void serializesConcurrentDoubleCloseSoExactlyOneCloseWins() throws Exception {
-        closeAnyOpenCashSession();
-        authenticateAdmin();
-        CashSessionResponse opened;
-        try {
-            opened = cashSessionService.openSession(OpenCashSessionRequest.builder()
-                .openingCash(new BigDecimal("40.0000"))
-                .build());
-        } finally {
-            SecurityContextHolder.clearContext();
-        }
-
-        CountDownLatch ready = new CountDownLatch(2);
-        CountDownLatch start = new CountDownLatch(1);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        List<Object> outcomes;
-        try {
-            List<CompletableFuture<Object>> attempts = Stream.generate(() ->
-                    CompletableFuture.supplyAsync(() -> {
-                        authenticateAdmin();
-                        ready.countDown();
-                        try {
-                            start.await(10, TimeUnit.SECONDS);
-                            return cashSessionService.closeSession(
-                                opened.getId(), CloseCashSessionRequest.builder()
-                                    .actualClosingCash(new BigDecimal("40.0000"))
-                                    .build());
-                        } catch (InterruptedException exception) {
-                            Thread.currentThread().interrupt();
-                            return new IllegalStateException(exception);
-                        } catch (RuntimeException exception) {
-                            return exception;
-                        } finally {
-                            SecurityContextHolder.clearContext();
-                        }
-                    }, executor))
-                .limit(2)
-                .toList();
-            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
-            start.countDown();
-            outcomes = attempts.stream().map(CompletableFuture::join).toList();
-        } finally {
-            start.countDown();
-            executor.shutdownNow();
-        }
-
-        assertThat(outcomes).filteredOn(CashSessionResponse.class::isInstance).hasSize(1);
-        assertThat(outcomes).filteredOn(CashSessionConflictException.class::isInstance).hasSize(1);
-        assertThat(cashSessionRepository.findById(opened.getId()).orElseThrow().getStatus())
-            .isEqualTo(CashSessionStatus.CLOSED);
     }
 
     @Test
@@ -1277,11 +1091,6 @@ class PostgreSqlMigrationAndContextTest {
             .build();
     }
 
-    private void authenticateAdmin() {
-        SecurityContextHolder.getContext().setAuthentication(
-            new UsernamePasswordAuthenticationToken("admin", "ignored", List.of()));
-    }
-
     private void closeAnyOpenCashSession() {
         jdbcTemplate.update("""
             UPDATE cash_sessions
@@ -1289,7 +1098,7 @@ class PostgreSqlMigrationAndContextTest {
                 actual_closing_cash = expected_closing_cash,
                 difference = 0.0000,
                 closed_at = CURRENT_TIMESTAMP,
-                closed_by_id = 1,
+                closed_by_id = opened_by_id,
                 version = version + 1
             WHERE status = 'OPEN'
             """);

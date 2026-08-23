@@ -12,6 +12,7 @@ import jakarta.validation.ConstraintViolationException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -102,8 +103,13 @@ public class GlobalExceptionHandler {
         CashMovementIdempotencyConflictException.class,
         CashSessionConflictException.class
     })
-    public ResponseEntity<?> handleInventoryConflict(RuntimeException ex) {
+    public ResponseEntity<?> handleDomainConflict(RuntimeException ex) {
         return domainError(ex, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<?> handleAuthenticationException(AuthenticationException ex) {
+        return domainError(ex, HttpStatus.UNAUTHORIZED);
     }
 
     @ExceptionHandler(ConstraintViolationException.class)

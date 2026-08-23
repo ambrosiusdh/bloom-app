@@ -8,7 +8,6 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.List;
 
 @Data
 @Builder
@@ -26,5 +25,4 @@ public class CashSessionResponse {
     private String closedBy;
     private CashSessionStatus status;
     private Long version;
-    private List<CashMovementResponse> movements;
 }

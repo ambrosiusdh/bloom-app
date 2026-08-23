@@ -1,7 +1,7 @@
 package com.bloom.app.service.support;
 
-import com.bloom.app.domain.enums.CashMovementDirection;
 import com.bloom.app.domain.model.CashSession;
+import com.bloom.app.persistence.projection.CashMovementTotals;
 import com.bloom.app.persistence.repository.CashMovementRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -14,15 +14,15 @@ public class CashReconciliationCalculator {
     private final CashMovementRepository cashMovementRepository;
 
     public Calculation calculate(CashSession session) {
-        BigDecimal totalIn = normalizedSum(session.getId(), CashMovementDirection.IN);
-        BigDecimal totalOut = normalizedSum(session.getId(), CashMovementDirection.OUT);
+        CashMovementTotals totals = cashMovementRepository.sumAmountsBySession(session.getId());
+        BigDecimal totalIn = normalized(totals.totalCashIn());
+        BigDecimal totalOut = normalized(totals.totalCashOut());
         BigDecimal expected = CashMoney.reconciliationBoundary(
             session.getOpeningCash().add(totalIn).subtract(totalOut));
         return new Calculation(totalIn, totalOut, expected);
     }
 
-    private BigDecimal normalizedSum(Long sessionId, CashMovementDirection direction) {
-        BigDecimal total = cashMovementRepository.sumAmountBySessionAndDirection(sessionId, direction);
+    private BigDecimal normalized(BigDecimal total) {
         return CashMoney.reconciliationBoundary(total == null ? BigDecimal.ZERO : total);
     }
 
