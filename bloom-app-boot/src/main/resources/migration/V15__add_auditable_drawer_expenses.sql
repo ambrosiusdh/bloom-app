@@ -12,10 +12,18 @@ $$;
 ALTER TABLE expenses
     ADD COLUMN voided_at TIMESTAMP,
     ADD COLUMN voided_by VARCHAR(255),
+    ADD COLUMN create_idempotency_key VARCHAR(100) NOT NULL,
+    ADD COLUMN create_request_hash VARCHAR(64) NOT NULL,
     ALTER COLUMN created_at SET NOT NULL,
     ALTER COLUMN created_by SET NOT NULL,
     ADD CONSTRAINT chk_expenses_amount_positive
         CHECK (amount > 0),
+    ADD CONSTRAINT uq_expenses_create_idempotency_key
+        UNIQUE (create_idempotency_key),
+    ADD CONSTRAINT chk_expenses_create_idempotency_key_not_blank
+        CHECK (LENGTH(BTRIM(create_idempotency_key)) > 0),
+    ADD CONSTRAINT chk_expenses_create_request_hash
+        CHECK (create_request_hash ~ '^[0-9a-f]{64}$'),
     ADD CONSTRAINT chk_expenses_category
         CHECK (category IN (
             'STORE_OPERATIONAL',
@@ -111,6 +119,8 @@ BEGIN
     END IF;
 
     IF NEW.cash_session_id IS DISTINCT FROM OLD.cash_session_id
+        OR NEW.create_idempotency_key IS DISTINCT FROM OLD.create_idempotency_key
+        OR NEW.create_request_hash IS DISTINCT FROM OLD.create_request_hash
         OR NEW.amount IS DISTINCT FROM OLD.amount
         OR NEW.category IS DISTINCT FROM OLD.category
         OR NEW.description IS DISTINCT FROM OLD.description

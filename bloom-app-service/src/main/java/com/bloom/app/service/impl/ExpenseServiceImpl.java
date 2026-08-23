@@ -7,6 +7,7 @@ import com.bloom.app.domain.enums.CashMovementType;
 import com.bloom.app.domain.enums.CashSessionStatus;
 import com.bloom.app.domain.enums.ExpenseCategory;
 import com.bloom.app.domain.exception.CashSessionConflictException;
+import com.bloom.app.domain.exception.ExpenseIdempotencyConflictException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.CashSession;
 import com.bloom.app.domain.model.Expense;
@@ -27,12 +28,18 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 
 @Service
 @RequiredArgsConstructor
 public class ExpenseServiceImpl implements ExpenseService {
     private static final int MAX_TEXT_LENGTH = 255;
+    private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 100;
 
     private final ExpenseRepository expenseRepository;
     private final CashSessionRepository cashSessionRepository;
@@ -42,7 +49,8 @@ public class ExpenseServiceImpl implements ExpenseService {
 
     @Override
     @Transactional
-    public ExpenseResponse createExpense(CreateExpenseRequest request) {
+    public ExpenseResponse createExpense(String idempotencyKey, CreateExpenseRequest request) {
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
         if (request == null) {
             throw new IllegalArgumentException("Create expense request is required");
         }
@@ -52,6 +60,17 @@ public class ExpenseServiceImpl implements ExpenseService {
         if (category == ExpenseCategory.OTHER && description == null) {
             throw new IllegalArgumentException("Expense description is required for OTHER category");
         }
+        String requestHash = createRequestHash(amount, category, description);
+
+        expenseRepository.lockCreateIdempotencyKey(normalizedKey);
+        Expense existing = expenseRepository.findByCreateIdempotencyKey(normalizedKey)
+            .orElse(null);
+        if (existing != null) {
+            if (!existing.getCreateRequestHash().equals(requestHash)) {
+                throw new ExpenseIdempotencyConflictException();
+            }
+            return expenseMapper.toResponse(existing);
+        }
 
         CashSession session = cashSessionRepository
             .findFirstByStatusForUpdate(CashSessionStatus.OPEN)
@@ -60,6 +79,8 @@ public class ExpenseServiceImpl implements ExpenseService {
 
         Expense saved = expenseRepository.saveAndFlush(Expense.builder()
             .cashSession(session)
+            .createIdempotencyKey(normalizedKey)
+            .createRequestHash(requestHash)
             .amount(amount)
             .category(category)
             .description(description)
@@ -138,6 +159,37 @@ public class ExpenseServiceImpl implements ExpenseService {
             throw new IllegalArgumentException("Expense category is required");
         }
         return category;
+    }
+
+    private String normalizeIdempotencyKey(String key) {
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("Idempotency-Key header is required");
+        }
+        String normalized = key.trim();
+        if (normalized.length() > MAX_IDEMPOTENCY_KEY_LENGTH) {
+            throw new IllegalArgumentException(
+                "Idempotency-Key must not exceed 100 characters");
+        }
+        return normalized;
+    }
+
+    private String createRequestHash(
+            BigDecimal amount, ExpenseCategory category, String description) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            updateHashField(digest, amount.stripTrailingZeros().toPlainString());
+            updateHashField(digest, category.name());
+            updateHashField(digest, description == null ? "" : description);
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is not available", exception);
+        }
+    }
+
+    private void updateHashField(MessageDigest digest, String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
+        digest.update(bytes);
     }
 
     private String normalizeOptional(String value, String fieldName) {

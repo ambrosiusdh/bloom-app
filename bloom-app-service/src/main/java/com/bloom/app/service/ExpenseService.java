@@ -7,7 +7,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 public interface ExpenseService {
-    ExpenseResponse createExpense(CreateExpenseRequest request);
+    ExpenseResponse createExpense(String idempotencyKey, CreateExpenseRequest request);
 
     ExpenseResponse getExpense(Long expenseId);
 

@@ -10,6 +10,8 @@ import com.bloom.app.service.ExpenseService;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 @Validated
@@ -32,9 +35,14 @@ public class ExpenseController {
     @PostMapping
     @Operation(summary = "Record an unexpected drawer expense")
     public ResponseEntity<ApiResponse<ExpenseResponse>> createExpense(
+            @RequestHeader("Idempotency-Key")
+            @NotBlank(message = "Idempotency-Key header is required")
+            @Size(max = 100, message = "Idempotency-Key must not exceed 100 characters")
+            String idempotencyKey,
             @Valid @RequestBody CreateExpenseRequest request) {
         return ResponseHelper.created(
-            "Expense recorded successfully", expenseService.createExpense(request));
+            "Expense recorded successfully",
+            expenseService.createExpense(idempotencyKey, request));
     }
 
     @GetMapping("/{expenseId}")

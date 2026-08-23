@@ -8,6 +8,7 @@ import com.bloom.app.domain.exception.IdempotencyConflictException;
 import com.bloom.app.domain.exception.CashMovementIdempotencyConflictException;
 import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.CheckoutIdempotencyConflictException;
+import com.bloom.app.domain.exception.ExpenseIdempotencyConflictException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import jakarta.validation.ConstraintViolationException;
@@ -20,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
@@ -55,6 +57,16 @@ public class GlobalExceptionHandler {
         Map<String, Object> body = new HashMap<>();
         body.put("success", false);
         body.put("message", "Malformed request body or unsupported value");
+        body.put("code", HttpStatus.BAD_REQUEST.value());
+        body.put("errorType", ex.getClass().getSimpleName());
+        return ResponseEntity.badRequest().body(body);
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<?> handleMissingRequestHeader(MissingRequestHeaderException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", false);
+        body.put("message", ex.getHeaderName() + " header is required");
         body.put("code", HttpStatus.BAD_REQUEST.value());
         body.put("errorType", ex.getClass().getSimpleName());
         return ResponseEntity.badRequest().body(body);
@@ -116,6 +128,7 @@ public class GlobalExceptionHandler {
         IdempotencyConflictException.class,
         CashMovementIdempotencyConflictException.class,
         CheckoutIdempotencyConflictException.class,
+        ExpenseIdempotencyConflictException.class,
         CashSessionConflictException.class
     })
     public ResponseEntity<?> handleDomainConflict(RuntimeException ex) {

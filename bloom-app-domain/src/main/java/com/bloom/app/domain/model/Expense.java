@@ -31,6 +31,12 @@ public class Expense {
     @JoinColumn(name = "cash_session_id", nullable = false)
     private CashSession cashSession;
 
+    @Column(name = "create_idempotency_key", nullable = false, length = 100, updatable = false)
+    private String createIdempotencyKey;
+
+    @Column(name = "create_request_hash", nullable = false, length = 64, updatable = false)
+    private String createRequestHash;
+
     @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal amount;
 

@@ -19,6 +19,7 @@ import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.CashMovementIdempotencyConflictException;
 import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.CheckoutIdempotencyConflictException;
+import com.bloom.app.domain.exception.ExpenseIdempotencyConflictException;
 import com.bloom.app.persistence.repository.CashMovementRepository;
 import com.bloom.app.persistence.repository.CashSessionRepository;
 import com.bloom.app.persistence.repository.ExpenseRepository;
@@ -433,9 +434,13 @@ class CashSessionPostgreSqlIntegrationTest {
     void expensePostingAndConcurrentVoidProduceOneOutAndOneReversal() throws Exception {
         authenticateAdmin();
         Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
-        ExpenseResponse created = expenseService.createExpense(expenseRequest(
+        String createKey = "owner-expense-" + UUID.randomUUID();
+        ExpenseResponse created = expenseService.createExpense(createKey, expenseRequest(
             "25.0000", ExpenseCategory.OWNER_WITHDRAWAL, "Owner draw"));
+        ExpenseResponse retried = expenseService.createExpense(createKey, expenseRequest(
+            "25.0", ExpenseCategory.OWNER_WITHDRAWAL, " Owner draw "));
 
+        assertThat(retried.getId()).isEqualTo(created.getId());
         assertThat(created.getCashSessionId()).isEqualTo(sessionId);
         assertThat(created.isOperationalExpense()).isFalse();
         assertThat(created.isVoided()).isFalse();
@@ -443,6 +448,9 @@ class CashSessionPostgreSqlIntegrationTest {
             .isEqualByComparingTo("75.0000");
         assertThat(movementCount(created.getId(), "EXPENSE")).isEqualTo(1L);
         assertThat(movementCount(created.getId(), "EXPENSE_REVERSAL")).isZero();
+        assertThatThrownBy(() -> expenseService.createExpense(createKey, expenseRequest(
+            "26.0000", ExpenseCategory.OWNER_WITHDRAWAL, "Owner draw")))
+            .isInstanceOf(ExpenseIdempotencyConflictException.class);
         SecurityContextHolder.clearContext();
 
         List<Object> outcomes = race(
@@ -463,10 +471,34 @@ class CashSessionPostgreSqlIntegrationTest {
     }
 
     @Test
+    void concurrentExpenseCreateRetryWritesOneExpenseAndOneCashOut() throws Exception {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        String createKey = "concurrent-expense-" + UUID.randomUUID();
+        CreateExpenseRequest request = expenseRequest(
+            "10.0000", ExpenseCategory.STORE_OPERATIONAL, "Cleaning supplies");
+        SecurityContextHolder.clearContext();
+
+        List<Object> outcomes = race(
+            () -> expenseService.createExpense(createKey, request),
+            () -> expenseService.createExpense(createKey, request)
+        );
+
+        assertThat(outcomes).allMatch(ExpenseResponse.class::isInstance);
+        assertThat(outcomes).extracting(outcome -> ((ExpenseResponse) outcome).getId())
+            .containsOnly(((ExpenseResponse) outcomes.getFirst()).getId());
+        var expense = expenseRepository.findByCreateIdempotencyKey(createKey).orElseThrow();
+        assertThat(movementCount(expense.getId(), "EXPENSE")).isEqualTo(1L);
+        assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
+            .isEqualByComparingTo("90.0000");
+    }
+
+    @Test
     void closedSessionRejectsExpenseVoidAndDatabaseRejectsEditOrDelete() {
         authenticateAdmin();
         Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
-        ExpenseResponse created = expenseService.createExpense(expenseRequest(
+        ExpenseResponse created = expenseService.createExpense(
+            "other-expense-" + UUID.randomUUID(), expenseRequest(
             "10.0000", ExpenseCategory.OTHER, "Emergency courier"));
 
         assertThatThrownBy(() -> jdbcTemplate.update(
@@ -487,17 +519,20 @@ class CashSessionPostgreSqlIntegrationTest {
 
     @Test
     void expenseValidationAndLedgerFailureLeaveNoPartialExpense() {
-        assertThatThrownBy(() -> expenseService.createExpense(expenseRequest(
+        assertThatThrownBy(() -> expenseService.createExpense(
+            "no-session-" + UUID.randomUUID(), expenseRequest(
             "1.0000", ExpenseCategory.CHARITY, null)))
             .isInstanceOf(CashSessionConflictException.class);
 
         authenticateAdmin();
         Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
-        assertThatThrownBy(() -> expenseService.createExpense(expenseRequest(
+        assertThatThrownBy(() -> expenseService.createExpense(
+            "zero-expense-" + UUID.randomUUID(), expenseRequest(
             "0.0000", ExpenseCategory.CHARITY, null)))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("positive");
-        assertThatThrownBy(() -> expenseService.createExpense(expenseRequest(
+        assertThatThrownBy(() -> expenseService.createExpense(
+            "blank-other-" + UUID.randomUUID(), expenseRequest(
             "1.0000", ExpenseCategory.OTHER, "  ")))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("required for OTHER");
@@ -514,7 +549,8 @@ class CashSessionPostgreSqlIntegrationTest {
             """, sessionId, conflictingExpenseId, "EXPENSE:" + conflictingExpenseId);
 
         long expenseCountBefore = expenseRepository.count();
-        assertThatThrownBy(() -> expenseService.createExpense(expenseRequest(
+        assertThatThrownBy(() -> expenseService.createExpense(
+            "ledger-conflict-" + UUID.randomUUID(), expenseRequest(
             "5.0000", ExpenseCategory.STORE_OPERATIONAL, "Cleaning supplies")))
             .isInstanceOf(CashMovementIdempotencyConflictException.class);
         assertThat(expenseRepository.count()).isEqualTo(expenseCountBefore);

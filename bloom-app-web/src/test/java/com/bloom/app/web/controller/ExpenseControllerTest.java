@@ -43,7 +43,7 @@ class ExpenseControllerTest {
 
     @Test
     void createsExpenseUsingStandardCreatedResponse() throws Exception {
-        when(expenseService.createExpense(any())).thenReturn(ExpenseResponse.builder()
+        when(expenseService.createExpense(any(), any())).thenReturn(ExpenseResponse.builder()
             .id(41L)
             .cashSessionId(7L)
             .amount(new BigDecimal("12.5000"))
@@ -52,6 +52,7 @@ class ExpenseControllerTest {
             .build());
 
         mockMvc.perform(post("/api/expenses")
+                .header("Idempotency-Key", "expense-41")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                     {"amount":12.5000,"category":"FOOD_AND_DRINK","description":"Team meal"}
@@ -66,20 +67,23 @@ class ExpenseControllerTest {
     @Test
     void rejectsInvalidMoneyOtherWithoutDescriptionAndBlankVoidReason() throws Exception {
         mockMvc.perform(post("/api/expenses")
+                .header("Idempotency-Key", "expense-invalid-money")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"amount\":1.00000,\"category\":\"CHARITY\"}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.errorType").value("ValidationFailed"));
 
         mockMvc.perform(post("/api/expenses")
+                .header("Idempotency-Key", "expense-invalid-category")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"amount\":1.0000,\"category\":\"PERSONAL_MONEY\"}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.errorType").value("HttpMessageNotReadableException"));
 
-        when(expenseService.createExpense(any())).thenThrow(
+        when(expenseService.createExpense(any(), any())).thenThrow(
             new IllegalArgumentException("Expense description is required for OTHER category"));
         mockMvc.perform(post("/api/expenses")
+                .header("Idempotency-Key", "expense-other")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"amount\":1.0000,\"category\":\"OTHER\",\"description\":\"  \"}"))
             .andExpect(status().isBadRequest())
@@ -91,6 +95,14 @@ class ExpenseControllerTest {
                 .content("{\"reason\":\"  \"}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.errorType").value("ValidationFailed"));
+    }
+
+    @Test
+    void requiresIdempotencyKeyForExpenseCreation() throws Exception {
+        mockMvc.perform(post("/api/expenses")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"amount\":1.0000,\"category\":\"CHARITY\"}"))
+            .andExpect(status().isBadRequest());
     }
 
     @Test

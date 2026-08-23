@@ -7,6 +7,7 @@ import com.bloom.app.domain.enums.CashMovementType;
 import com.bloom.app.domain.enums.CashSessionStatus;
 import com.bloom.app.domain.enums.ExpenseCategory;
 import com.bloom.app.domain.exception.CashSessionConflictException;
+import com.bloom.app.domain.exception.ExpenseIdempotencyConflictException;
 import com.bloom.app.domain.model.CashSession;
 import com.bloom.app.domain.model.Expense;
 import com.bloom.app.persistence.repository.CashSessionRepository;
@@ -27,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -60,6 +62,8 @@ class ExpenseServiceImplTest {
         ExpenseResponse expected = ExpenseResponse.builder().id(41L).build();
         when(cashSessionRepository.findFirstByStatusForUpdate(CashSessionStatus.OPEN))
             .thenReturn(Optional.of(session));
+        when(expenseRepository.findByCreateIdempotencyKey("expense-41"))
+            .thenReturn(Optional.empty());
         when(expenseRepository.saveAndFlush(any())).thenAnswer(invocation -> {
             Expense expense = invocation.getArgument(0);
             expense.setId(41L);
@@ -67,7 +71,7 @@ class ExpenseServiceImplTest {
         });
         when(expenseMapper.toResponse(any())).thenReturn(expected);
 
-        ExpenseResponse actual = service.createExpense(CreateExpenseRequest.builder()
+        ExpenseResponse actual = service.createExpense(" expense-41 ", CreateExpenseRequest.builder()
             .amount(new BigDecimal("12.5"))
             .category(ExpenseCategory.FOOD_AND_DRINK)
             .description("  Team meal  ")
@@ -79,6 +83,10 @@ class ExpenseServiceImplTest {
         assertThat(expenseCaptor.getValue().getCashSession()).isSameAs(session);
         assertThat(expenseCaptor.getValue().getAmount()).isEqualByComparingTo("12.5000");
         assertThat(expenseCaptor.getValue().getDescription()).isEqualTo("Team meal");
+        assertThat(expenseCaptor.getValue().getCreateIdempotencyKey()).isEqualTo("expense-41");
+        assertThat(expenseCaptor.getValue().getCreateRequestHash())
+            .matches("[0-9a-f]{64}");
+        verify(expenseRepository).lockCreateIdempotencyKey("expense-41");
 
         ArgumentCaptor<RecordCashMovementCommand> movementCaptor =
             ArgumentCaptor.forClass(RecordCashMovementCommand.class);
@@ -94,7 +102,7 @@ class ExpenseServiceImplTest {
 
     @Test
     void requiresDescriptionForOtherAndAnOpenSession() {
-        assertThatThrownBy(() -> service.createExpense(CreateExpenseRequest.builder()
+        assertThatThrownBy(() -> service.createExpense("other-blank", CreateExpenseRequest.builder()
             .amount(BigDecimal.ONE)
             .category(ExpenseCategory.OTHER)
             .description("   ")
@@ -104,13 +112,55 @@ class ExpenseServiceImplTest {
 
         when(cashSessionRepository.findFirstByStatusForUpdate(CashSessionStatus.OPEN))
             .thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.createExpense(CreateExpenseRequest.builder()
+        assertThatThrownBy(() -> service.createExpense("charity-no-session", CreateExpenseRequest.builder()
             .amount(BigDecimal.ONE)
             .category(ExpenseCategory.CHARITY)
             .build()))
             .isInstanceOf(CashSessionConflictException.class)
             .hasMessageContaining("open cash session");
         verify(expenseRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void idempotentRetryReturnsExistingAndChangedPayloadConflicts() {
+        Expense existing = Expense.builder()
+            .id(41L)
+            .cashSession(openSession())
+            .amount(new BigDecimal("12.5000"))
+            .category(ExpenseCategory.FOOD_AND_DRINK)
+            .description("Team meal")
+            .createIdempotencyKey("expense-41")
+            .createRequestHash("unused")
+            .build();
+        CreateExpenseRequest request = CreateExpenseRequest.builder()
+            .amount(new BigDecimal("12.5"))
+            .category(ExpenseCategory.FOOD_AND_DRINK)
+            .description(" Team meal ")
+            .build();
+
+        when(expenseRepository.findByCreateIdempotencyKey("expense-41"))
+            .thenReturn(Optional.empty());
+        when(cashSessionRepository.findFirstByStatusForUpdate(CashSessionStatus.OPEN))
+            .thenReturn(Optional.of(openSession()));
+        when(expenseRepository.saveAndFlush(any())).thenAnswer(invocation -> {
+            Expense saved = invocation.getArgument(0);
+            saved.setId(41L);
+            existing.setCreateRequestHash(saved.getCreateRequestHash());
+            return saved;
+        });
+        service.createExpense("expense-41", request);
+
+        when(expenseRepository.findByCreateIdempotencyKey("expense-41"))
+            .thenReturn(Optional.of(existing));
+        service.createExpense("expense-41", request);
+        assertThatThrownBy(() -> service.createExpense("expense-41",
+            CreateExpenseRequest.builder()
+                .amount(new BigDecimal("13.0000"))
+                .category(ExpenseCategory.FOOD_AND_DRINK)
+                .description("Team meal")
+                .build()))
+            .isInstanceOf(ExpenseIdempotencyConflictException.class);
+        verify(cashMovementService, times(1)).recordMovement(any());
     }
 
     @Test

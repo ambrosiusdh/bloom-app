@@ -243,6 +243,7 @@ This contract does not add `BANK_TRANSFER` as a sale payment method. The current
 An `Expense` in Release 1 is an unexpected outflow of store drawer cash.
 
 - It requires and belongs to the currently open `CashSession`.
+- Creation requires an `Idempotency-Key`; retrying the same canonical request returns the original expense, while reusing the key for a changed request is rejected.
 - Recording it decreases expected drawer cash by its amount.
 - It must be rejected if no session is open or the target session is closed.
 - A mistake is retained and voided/reversed, never hard-deleted.

@@ -15,6 +15,15 @@ import java.util.Optional;
 
 @Repository
 public interface ExpenseRepository extends JpaRepository<Expense, Long> {
+    @Query(
+        value = "SELECT pg_advisory_xact_lock(hashtextextended('EXPENSE_CREATE:' || CAST(:key AS text), 0))",
+        nativeQuery = true
+    )
+    void lockCreateIdempotencyKey(@Param("key") String key);
+
+    @EntityGraph(attributePaths = "cashSession")
+    Optional<Expense> findByCreateIdempotencyKey(String createIdempotencyKey);
+
     @Override
     @EntityGraph(attributePaths = "cashSession")
     Optional<Expense> findById(Long id);
