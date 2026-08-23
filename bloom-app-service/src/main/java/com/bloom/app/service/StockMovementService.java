@@ -9,6 +9,8 @@ import com.bloom.app.domain.model.StockAdjustment;
 import com.bloom.app.domain.model.UnitOfMeasure;
 
 import java.math.BigDecimal;
+import java.util.Collection;
+import java.util.Set;
 
 public interface StockMovementService {
     void recordMovement(
@@ -22,5 +24,11 @@ public interface StockMovementService {
     );
     void recordSaleMovements(Sale sale);
     void recordManualAdjustment(StockAdjustment adjustment);
-    void validateBaseUnitOfMeasureChange(Item item, UnitOfMeasure requestedUnitOfMeasure);
+    boolean validateMeasurementRuleChanges(
+        Item item,
+        UnitOfMeasure requestedUnitOfMeasure,
+        Boolean requestedFractionalQuantityAllowed
+    );
+    boolean hasStockMovements(Long itemId);
+    Set<Long> findItemIdsWithStockMovements(Collection<Long> itemIds);
 }

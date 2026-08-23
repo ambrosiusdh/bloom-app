@@ -2,6 +2,7 @@ package com.bloom.app.api.exception;
 
 import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
+import com.bloom.app.domain.exception.FractionalQuantityPolicyImmutableException;
 import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.exception.IdempotencyConflictException;
 import com.bloom.app.domain.exception.CashMovementIdempotencyConflictException;
@@ -99,6 +100,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
         StockConcurrencyException.class,
         BaseUnitOfMeasureImmutableException.class,
+        FractionalQuantityPolicyImmutableException.class,
         IdempotencyConflictException.class,
         CashMovementIdempotencyConflictException.class,
         CashSessionConflictException.class

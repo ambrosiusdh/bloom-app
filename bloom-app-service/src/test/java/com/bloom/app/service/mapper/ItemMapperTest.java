@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.math.BigDecimal;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ItemMapperTest {
@@ -18,15 +20,15 @@ class ItemMapperTest {
     }
 
     @Test
-    void mapsUomMetadataInBothDirections() {
+    void mapsFrontendInventoryReadModelWithoutMergingLocationStock() {
         CreateItemRequest request = CreateItemRequest.builder()
             .name("Fabric")
             .categoryCode("FAB")
-            .price(java.math.BigDecimal.TEN)
+            .price(BigDecimal.TEN)
             .baseUnitOfMeasure(UnitOfMeasure.METER)
             .fractionalQuantityAllowed(true)
-            .stockStore(new java.math.BigDecimal("1.2500"))
-            .stockWarehouse(new java.math.BigDecimal("0.5000"))
+            .stockStore(new BigDecimal("1.2500"))
+            .stockWarehouse(new BigDecimal("0.0001"))
             .build();
 
         Item item = mapper.createRequestToEntity(request);
@@ -35,17 +37,41 @@ class ItemMapperTest {
         Item stockedItem = Item.builder()
             .baseUnitOfMeasure(item.getBaseUnitOfMeasure())
             .fractionalQuantityAllowed(item.isFractionalQuantityAllowed())
-            .stockStore(new java.math.BigDecimal("1.2500"))
-            .stockWarehouse(new java.math.BigDecimal("0.5000"))
+            .stockStore(new BigDecimal("1.2500"))
+            .stockWarehouse(new BigDecimal("0.0001"))
+            .active(false)
             .build();
-        ItemResponse response = mapper.itemToItemResponse(stockedItem);
+
+        ItemResponse response = mapper.itemToItemResponse(stockedItem, true);
 
         assertThat(item.getBaseUnitOfMeasure()).isEqualTo(UnitOfMeasure.METER);
         assertThat(item.isFractionalQuantityAllowed()).isTrue();
         assertThat(response.getBaseUnitOfMeasure()).isEqualTo(UnitOfMeasure.METER);
         assertThat(response.isFractionalQuantityAllowed()).isTrue();
-        assertThat(response.getStockStore()).isEqualByComparingTo("1.2500");
-        assertThat(response.getStockWarehouse()).isEqualByComparingTo("0.5000");
-        assertThat(response.getStockQuantity()).isEqualByComparingTo("1.7500");
+        assertThat(response.getStockStore()).isEqualTo(new BigDecimal("1.2500"));
+        assertThat(response.getStockWarehouse()).isEqualTo(new BigDecimal("0.0001"));
+        assertThat(response.isActive()).isFalse();
+        assertThat(response.isHasStockMovements()).isTrue();
+        assertThat(response.isBaseUnitOfMeasureLocked()).isTrue();
+        assertThat(response.isFractionalQuantityAllowedLocked()).isTrue();
+
+        // Temporary compatibility aggregate; location fields above map directly from Item.
+        assertThat(response.getStockQuantity()).isEqualTo(new BigDecimal("1.2501"));
+    }
+
+    @Test
+    void copiesActiveStateAndLeavesLocksOpenWithoutMovements() {
+        Item item = Item.builder()
+            .active(true)
+            .stockStore(BigDecimal.ZERO)
+            .stockWarehouse(BigDecimal.ZERO)
+            .build();
+
+        ItemResponse response = mapper.itemToItemResponse(item, false);
+
+        assertThat(response.isActive()).isTrue();
+        assertThat(response.isHasStockMovements()).isFalse();
+        assertThat(response.isBaseUnitOfMeasureLocked()).isFalse();
+        assertThat(response.isFractionalQuantityAllowedLocked()).isFalse();
     }
 }
