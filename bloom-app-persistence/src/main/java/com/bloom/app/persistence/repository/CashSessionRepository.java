@@ -21,6 +21,10 @@ public interface CashSessionRepository extends JpaRepository<CashSession, Long>,
     @EntityGraph(attributePaths = {"openedBy", "closedBy"})
     Optional<CashSession> findFirstByStatus(CashSessionStatus status);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT session FROM CashSession session WHERE session.status = :status")
+    Optional<CashSession> findFirstByStatusForUpdate(@Param("status") CashSessionStatus status);
+
     @Override
     @EntityGraph(attributePaths = {"openedBy", "closedBy"})
     Optional<CashSession> findById(Long id);

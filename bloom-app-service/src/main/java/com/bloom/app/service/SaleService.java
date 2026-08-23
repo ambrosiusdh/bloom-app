@@ -9,7 +9,7 @@ import org.springframework.data.domain.Pageable;
 import java.io.OutputStream;
 
 public interface SaleService {
-    SaleResponse createSale(CreateSaleRequest request);
+    SaleResponse createSale(String checkoutIdempotencyKey, CreateSaleRequest request);
 
     Page<SaleResponse> filterSales(FilterSaleRequest request, Pageable pageable);
 

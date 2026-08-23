@@ -2,16 +2,27 @@ package com.bloom.app;
 
 import com.bloom.app.api.dto.request.cashsession.CloseCashSessionRequest;
 import com.bloom.app.api.dto.request.cashsession.OpenCashSessionRequest;
+import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
+import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
 import com.bloom.app.api.dto.response.cashsession.CashMovementResponse;
 import com.bloom.app.api.dto.response.cashsession.CashSessionResponse;
+import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.domain.enums.CashMovementType;
 import com.bloom.app.domain.enums.CashSessionStatus;
+import com.bloom.app.domain.enums.MovementSourceType;
+import com.bloom.app.domain.enums.PaymentType;
+import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.CashMovementIdempotencyConflictException;
 import com.bloom.app.domain.exception.CashSessionConflictException;
+import com.bloom.app.domain.exception.CheckoutIdempotencyConflictException;
 import com.bloom.app.persistence.repository.CashMovementRepository;
 import com.bloom.app.persistence.repository.CashSessionRepository;
+import com.bloom.app.persistence.repository.ItemRepository;
+import com.bloom.app.persistence.repository.SaleRepository;
+import com.bloom.app.persistence.repository.StockMovementRepository;
 import com.bloom.app.service.CashMovementService;
 import com.bloom.app.service.CashSessionService;
+import com.bloom.app.service.SaleService;
 import com.bloom.app.service.command.RecordCashMovementCommand;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -24,6 +35,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -31,6 +43,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -58,6 +71,18 @@ class CashSessionPostgreSqlIntegrationTest {
 
     @Autowired
     private CashMovementRepository cashMovementRepository;
+
+    @Autowired
+    private SaleService saleService;
+
+    @Autowired
+    private SaleRepository saleRepository;
+
+    @Autowired
+    private ItemRepository itemRepository;
+
+    @Autowired
+    private StockMovementRepository stockMovementRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -261,6 +286,137 @@ class CashSessionPostgreSqlIntegrationTest {
             .isEqualByComparingTo("100.0000");
     }
 
+    @Test
+    void cashCheckoutRecordsTotalNotTenderedCashAndSequentialRetryWritesOnce() {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        ItemFixture item = insertCheckoutItem("CASH", "10.0000", "5.0000");
+        String checkoutKey = "cash-checkout-" + UUID.randomUUID();
+        CreateSaleRequest request = checkoutRequest(
+            PaymentType.CASH, "25.0000", item.sku(), "2.0000");
+
+        SaleResponse first = saleService.createSale(checkoutKey, request);
+        SaleResponse retry = saleService.createSale(checkoutKey, request);
+
+        assertThat(retry.getCode()).isEqualTo(first.getCode());
+        assertThat(first.getSessionId()).isEqualTo(sessionId);
+        assertThat(first.getPaymentType()).isEqualTo(PaymentType.CASH);
+        assertThat(first.getPaidAmount()).isEqualByComparingTo("25.0000");
+        assertThat(first.getTotalAmount()).isEqualByComparingTo("20.0000");
+        assertThat(first.getChangeAmount()).isEqualByComparingTo("5.0000");
+
+        var sale = saleRepository.findByCheckoutIdempotencyKey(checkoutKey).orElseThrow();
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM sales WHERE checkout_idempotency_key = ?",
+            Long.class, checkoutKey)).isEqualTo(1L);
+        assertThat(stockMovementRepository.findBySourceTypeAndSourceId(
+            MovementSourceType.SALE, sale.getId())).hasSize(1);
+        assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
+            .isEqualByComparingTo("3.0000");
+        assertThat(cashMovementRepository.findByIdempotencyKey(
+            "SALE_PAYMENT:" + sale.getId()).orElseThrow().getAmount())
+            .isEqualByComparingTo("20.0000");
+        assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
+            .isEqualByComparingTo("120.0000");
+
+        CreateSaleRequest changed = checkoutRequest(
+            PaymentType.CASH, "30.0000", item.sku(), "2.0000");
+        assertThatThrownBy(() -> saleService.createSale(checkoutKey, changed))
+            .isInstanceOf(CheckoutIdempotencyConflictException.class);
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM sales WHERE checkout_idempotency_key = ?",
+            Long.class, checkoutKey)).isEqualTo(1L);
+    }
+
+    @Test
+    void qrisRequiresExactPaymentAndHasNoPhysicalCashMovement() {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        ItemFixture item = insertCheckoutItem("QRIS", "10.0000", "5.0000");
+
+        assertThatThrownBy(() -> saleService.createSale(
+            "qris-overpaid-" + UUID.randomUUID(),
+            checkoutRequest(PaymentType.QRIS, "11.0000", item.sku(), "1.0000")))
+            .isInstanceOf(com.bloom.app.domain.exception.BusinessException.class);
+        assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
+            .isEqualByComparingTo("5.0000");
+
+        String checkoutKey = "qris-checkout-" + UUID.randomUUID();
+        SaleResponse response = saleService.createSale(
+            checkoutKey,
+            checkoutRequest(PaymentType.QRIS, "10.0000", item.sku(), "1.0000"));
+
+        assertThat(response.getSessionId()).isEqualTo(sessionId);
+        assertThat(response.getPaymentType()).isEqualTo(PaymentType.QRIS);
+        assertThat(response.getPaidAmount()).isEqualByComparingTo("10.0000");
+        assertThat(response.getTotalAmount()).isEqualByComparingTo("10.0000");
+        assertThat(response.getChangeAmount()).isEqualByComparingTo("0.0000");
+        var sale = saleRepository.findByCheckoutIdempotencyKey(checkoutKey).orElseThrow();
+        assertThat(cashMovementRepository.findByIdempotencyKey(
+            "SALE_PAYMENT:" + sale.getId())).isEmpty();
+        assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
+            .isEqualByComparingTo("100.0000");
+        assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
+            .isEqualByComparingTo("4.0000");
+    }
+
+    @Test
+    void checkoutRequiresOpenSessionAndDownstreamCashFailureRollsEverythingBack() {
+        ItemFixture item = insertCheckoutItem("ROLLBACK", "10.0000", "5.0000");
+        CreateSaleRequest request = checkoutRequest(
+            PaymentType.CASH, "10.0000", item.sku(), "1.0000");
+
+        assertThatThrownBy(() -> saleService.createSale(
+            "no-session-" + UUID.randomUUID(), request))
+            .isInstanceOf(CashSessionConflictException.class);
+
+        authenticateAdmin();
+        cashSessionService.openSession(openRequest("100.0000"));
+        SecurityContextHolder.clearContext();
+        String checkoutKey = "rollback-checkout-" + UUID.randomUUID();
+        long cashMovementCountBefore = cashMovementRepository.count();
+
+        assertThatThrownBy(() -> saleService.createSale(checkoutKey, request))
+            .isInstanceOf(AuthenticationCredentialsNotFoundException.class);
+
+        assertThat(saleRepository.findByCheckoutIdempotencyKey(checkoutKey)).isEmpty();
+        assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
+            .isEqualByComparingTo("5.0000");
+        assertThat(stockMovementRepository.findByProductId(item.id())).isEmpty();
+        assertThat(cashMovementRepository.count()).isEqualTo(cashMovementCountBefore);
+    }
+
+    @Test
+    void concurrentCheckoutRetryReturnsOneSaleOneDeductionAndOneCashMovement() throws Exception {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        ItemFixture item = insertCheckoutItem("CONCURRENT", "10.0000", "5.0000");
+        String checkoutKey = "concurrent-checkout-" + UUID.randomUUID();
+        CreateSaleRequest request = checkoutRequest(
+            PaymentType.CASH, "10.0000", item.sku(), "1.0000");
+        SecurityContextHolder.clearContext();
+
+        List<Object> outcomes = race(
+            () -> saleService.createSale(checkoutKey, request),
+            () -> saleService.createSale(checkoutKey, request));
+
+        assertThat(outcomes).allMatch(SaleResponse.class::isInstance);
+        assertThat(outcomes).extracting(outcome -> ((SaleResponse) outcome).getCode())
+            .containsOnly(((SaleResponse) outcomes.getFirst()).getCode());
+        var sale = saleRepository.findByCheckoutIdempotencyKey(checkoutKey).orElseThrow();
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM sales WHERE checkout_idempotency_key = ?",
+            Long.class, checkoutKey)).isEqualTo(1L);
+        assertThat(stockMovementRepository.findBySourceTypeAndSourceId(
+            MovementSourceType.SALE, sale.getId())).hasSize(1);
+        assertThat(cashMovementRepository.findByIdempotencyKey(
+            "SALE_PAYMENT:" + sale.getId())).isPresent();
+        assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
+            .isEqualByComparingTo("4.0000");
+        assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
+            .isEqualByComparingTo("110.0000");
+    }
+
     private List<Object> race(Supplier<?> first, Supplier<?> second) throws Exception {
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
@@ -314,6 +470,40 @@ class CashSessionPostgreSqlIntegrationTest {
             String amount) {
         return new RecordCashMovementCommand(
             sessionId, type, sourceId, reference, new BigDecimal(amount));
+    }
+
+    private ItemFixture insertCheckoutItem(String purpose, String price, String storeStock) {
+        String sku = "CHECKOUT-" + purpose + "-" + UUID.randomUUID();
+        Long id = jdbcTemplate.queryForObject("""
+            INSERT INTO items (
+                name, sku, price, stock_quantity, stock_store, stock_warehouse,
+                base_unit_of_measure, fractional_quantity_allowed, active,
+                item_category_id, version
+            ) VALUES (?, ?, ?, ?, ?, 0.0000, 'PIECE', FALSE, TRUE, 1, 0)
+            RETURNING id
+            """, Long.class, purpose + " checkout item", sku,
+            new BigDecimal(price), new BigDecimal(storeStock), new BigDecimal(storeStock));
+        return new ItemFixture(id, sku);
+    }
+
+    private CreateSaleRequest checkoutRequest(
+            PaymentType paymentType,
+            String paidAmount,
+            String itemSku,
+            String quantity) {
+        return CreateSaleRequest.builder()
+            .discountAmount(BigDecimal.ZERO)
+            .paidAmount(new BigDecimal(paidAmount))
+            .paymentType(paymentType)
+            .saleItemList(List.of(CreateSaleItemRequest.builder()
+                .itemSku(itemSku)
+                .quantity(new BigDecimal(quantity))
+                .stockLocation(StockLocation.STORE)
+                .build()))
+            .build();
+    }
+
+    private record ItemFixture(Long id, String sku) {
     }
 
     private void closeAnyOpenCashSession() {
