@@ -17,10 +17,12 @@ import java.util.List;
 @Builder
 public class SaleResponse {
     private String code;
+    private Long sessionId;
     private BigDecimal subtotalAmount;
     private BigDecimal discountAmount;
     private BigDecimal totalAmount;
     private BigDecimal paidAmount;
+    private BigDecimal changeAmount;
     private PaymentType paymentType;
     private String description;
     private Instant createdAt;

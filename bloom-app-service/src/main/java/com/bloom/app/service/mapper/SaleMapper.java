@@ -15,8 +15,13 @@ import org.mapstruct.NullValuePropertyMappingStrategy;
 )
 public interface SaleMapper {
     @Mapping(target = "saleItems", source = "items")
+    @Mapping(target = "sessionId", source = "cashSession.id")
     SaleResponse saleToResponse(Sale sale);
 
     @Mapping(target = "items", ignore = true)
+    @Mapping(target = "cashSession", ignore = true)
+    @Mapping(target = "checkoutIdempotencyKey", ignore = true)
+    @Mapping(target = "checkoutRequestHash", ignore = true)
+    @Mapping(target = "changeAmount", ignore = true)
     Sale createRequestToEntity(CreateSaleRequest request);
 }

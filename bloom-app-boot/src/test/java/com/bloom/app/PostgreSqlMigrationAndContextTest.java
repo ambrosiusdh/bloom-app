@@ -51,6 +51,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DataAccessException;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -160,7 +162,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsBaselineStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("13");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("14");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
@@ -198,6 +200,10 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(columnExists("cash_sessions", "expected_closing_cash")).isTrue();
         assertThat(columnExists("cash_sessions", "actual_closing_cash")).isTrue();
         assertThat(columnExists("cash_sessions", "difference")).isTrue();
+        assertThat(columnExists("sales", "cash_session_id")).isTrue();
+        assertThat(columnExists("sales", "change_amount")).isTrue();
+        assertThat(columnExists("sales", "checkout_idempotency_key")).isTrue();
+        assertThat(columnExists("sales", "checkout_request_hash")).isTrue();
         assertThat(columnExists("expenses", "version")).isTrue();
         assertThat(columnExists("item_category_counters", "version")).isFalse();
         assertThat(constraintExists(
@@ -224,12 +230,14 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(indexExists("idx_stock_movements_product_history")).isTrue();
         assertThat(indexExists("uq_cash_sessions_single_open")).isTrue();
         assertThat(indexExists("uq_cash_movements_idempotency_key")).isTrue();
+        assertThat(indexExists("idx_sales_cash_session_id")).isTrue();
 
         assertThat(numericScale("items", "price")).isEqualTo(4);
         assertThat(numericScale("sales", "subtotal_amount")).isEqualTo(4);
         assertThat(numericScale("sales", "discount_amount")).isEqualTo(4);
         assertThat(numericScale("sales", "total_amount")).isEqualTo(4);
         assertThat(numericScale("sales", "paid_amount")).isEqualTo(4);
+        assertThat(numericScale("sales", "change_amount")).isEqualTo(4);
         assertThat(numericScale("sale_items", "unit_price")).isEqualTo(4);
         assertThat(numericScale("sale_items", "subtotal")).isEqualTo(4);
         assertThat(numericScale("goods_receipts", "total_amount")).isEqualTo(4);
@@ -499,6 +507,16 @@ class PostgreSqlMigrationAndContextTest {
     @Test
     @Transactional
     void createsAggregatedFractionalSaleWithSnapshotsAndOneDeduction() {
+        closeAnyOpenCashSession();
+        Long sessionId = jdbcTemplate.queryForObject("""
+            INSERT INTO cash_sessions (
+                opened_by_id, opening_cash, expected_closing_cash,
+                status, opened_at, version
+            ) VALUES (1, 100.0000, 100.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
+            RETURNING id
+            """, Long.class);
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken("admin", "ignored", List.of()));
         Long itemId = insertInventoryItem("SALE-INTEGRATION", new BigDecimal("1.0000"));
         Item item = itemRepository.findById(itemId).orElseThrow();
         CreateSaleRequest request = CreateSaleRequest.builder()
@@ -511,7 +529,12 @@ class PostgreSqlMigrationAndContextTest {
             ))
             .build();
 
-        SaleResponse response = saleService.createSale(request);
+        SaleResponse response;
+        try {
+            response = saleService.createSale("sale-integration-" + UUID.randomUUID(), request);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
 
         Sale savedSale = saleRepository.findByCode(response.getCode()).orElseThrow();
         assertThat(savedSale.getItems()).hasSize(1);
@@ -519,6 +542,9 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(savedSale.getItems().getFirst().getUnitPrice()).isEqualByComparingTo("10.0000");
         assertThat(savedSale.getItems().getFirst().getSubtotal()).isEqualByComparingTo("7.5000");
         assertThat(savedSale.getTotalAmount()).isEqualByComparingTo("7.5000");
+        assertThat(savedSale.getCashSession().getId()).isEqualTo(sessionId);
+        assertThat(response.getSessionId()).isEqualTo(sessionId);
+        assertThat(response.getChangeAmount()).isEqualByComparingTo("0.0000");
         assertThat(itemRepository.findById(itemId).orElseThrow().getStockStore())
             .isEqualByComparingTo("0.2500");
 

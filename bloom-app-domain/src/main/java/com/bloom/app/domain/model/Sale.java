@@ -24,7 +24,13 @@ import java.util.List;
 @Builder
 @Entity
 @EntityListeners(AuditingEntityListener.class)
-@Table(name = "sales")
+@Table(
+    name = "sales",
+    uniqueConstraints = @UniqueConstraint(
+        name = "uq_sales_checkout_idempotency_key",
+        columnNames = "checkout_idempotency_key"
+    )
+)
 public class Sale {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -44,11 +50,25 @@ public class Sale {
 
     @Column(precision = 19, scale = 4)
     private BigDecimal paidAmount;
+
+    @Column(nullable = false, precision = 19, scale = 4)
+    private BigDecimal changeAmount;
+
     private String description;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private PaymentType paymentType;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "cash_session_id", nullable = false, updatable = false)
+    private CashSession cashSession;
+
+    @Column(name = "checkout_idempotency_key", nullable = false, length = 100, updatable = false)
+    private String checkoutIdempotencyKey;
+
+    @Column(name = "checkout_request_hash", nullable = false, length = 64, updatable = false)
+    private String checkoutRequestHash;
 
     @Column(updatable = false)
     @CreatedDate

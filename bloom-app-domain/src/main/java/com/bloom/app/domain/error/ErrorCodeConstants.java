@@ -23,4 +23,6 @@ public class ErrorCodeConstants {
     public static final String SALE_INSUFFICIENT_STOCK_MESSAGE = "Jumlah stok item %s pada %s tidak mencukupi untuk transaksi";
     public static final String SALE_PAID_LESS_THAN_TOTAL_CODE = "sale_paid_less_than_total";
     public static final String SALE_PAID_LESS_THAN_TOTAL_MESSAGE = "Jumlah pembayaran lebih kecil dari total transaksi";
+    public static final String SALE_QRIS_PAYMENT_MISMATCH_CODE = "sale_qris_payment_mismatch";
+    public static final String SALE_QRIS_PAYMENT_MISMATCH_MESSAGE = "Jumlah pembayaran QRIS harus sama dengan total transaksi";
 }
