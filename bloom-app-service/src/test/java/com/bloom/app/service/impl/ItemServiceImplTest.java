@@ -1,12 +1,14 @@
 package com.bloom.app.service.impl;
 
 import com.bloom.app.api.dto.request.item.CreateItemRequest;
-import com.bloom.app.api.dto.response.item.ItemResponse;
+import com.bloom.app.api.dto.request.item.FilterItemRequest;
 import com.bloom.app.api.dto.request.item.UpdateItemRequest;
-import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
+import com.bloom.app.api.dto.response.item.ItemResponse;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
+import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
+import com.bloom.app.domain.exception.FractionalQuantityPolicyImmutableException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
 import com.bloom.app.domain.model.UnitOfMeasure;
@@ -17,20 +19,27 @@ import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.mapper.ItemMapper;
 import com.bloom.app.service.util.PdfGeneratorUtil;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import org.mockito.InOrder;
 
 class ItemServiceImplTest {
     private final ItemRepository itemRepository = mock(ItemRepository.class);
@@ -62,13 +71,12 @@ class ItemServiceImplTest {
             .stockWarehouse(new BigDecimal("2.0000"))
             .build();
         ItemCategory category = ItemCategory.builder().code("FAB").build();
-        Item item = Item.builder()
-            .stockStore(BigDecimal.ZERO)
-            .stockWarehouse(BigDecimal.ZERO)
-            .baseUnitOfMeasure(UnitOfMeasure.METER)
-            .fractionalQuantityAllowed(true)
+        Item item = item(42L, true, true);
+        item.setId(null);
+        ItemResponse expectedResponse = ItemResponse.builder()
+            .sku("FAB-00001")
+            .hasStockMovements(true)
             .build();
-        ItemResponse expectedResponse = ItemResponse.builder().sku("FAB-00001").build();
 
         when(itemCategoryRepository.findByCode("FAB")).thenReturn(Optional.of(category));
         when(itemMapper.createRequestToEntity(request)).thenReturn(item);
@@ -79,7 +87,7 @@ class ItemServiceImplTest {
             savedItem.setId(42L);
             return savedItem;
         });
-        when(itemMapper.itemToItemResponse(item)).thenReturn(expectedResponse);
+        when(itemMapper.itemToItemResponse(item, true)).thenReturn(expectedResponse);
 
         ItemResponse response = service.createItem(request);
 
@@ -123,49 +131,194 @@ class ItemServiceImplTest {
             .stockWarehouse(null)
             .build();
         ItemCategory category = ItemCategory.builder().code("FAB").build();
-        Item item = Item.builder()
-            .stockStore(BigDecimal.ZERO)
-            .stockWarehouse(BigDecimal.ZERO)
-            .baseUnitOfMeasure(UnitOfMeasure.METER)
-            .fractionalQuantityAllowed(true)
-            .build();
+        Item item = item(null, true, true);
 
         when(itemCategoryRepository.findByCode("FAB")).thenReturn(Optional.of(category));
         when(itemMapper.createRequestToEntity(request)).thenReturn(item);
         when(itemRepository.saveAndFlush(item)).thenReturn(item);
-        when(itemMapper.itemToItemResponse(item)).thenReturn(ItemResponse.builder().build());
+        when(itemMapper.itemToItemResponse(item, false)).thenReturn(ItemResponse.builder().build());
 
         service.createItem(request);
 
         verify(itemRepository).saveAndFlush(item);
         verify(stockMovementService, never()).recordMovement(
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any());
+            any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
-    void rejectsUomChangeWhenStockBoundaryFindsMovement() {
+    void listUsesOneBatchMovementLookupAndMapsBothLockStates() {
+        FilterItemRequest filter = FilterItemRequest.builder().build();
+        PageRequest pageable = PageRequest.of(0, 20);
+        Item withoutMovements = item(1L, true, true);
+        Item withMovements = item(2L, true, true);
+        ItemResponse unlocked = ItemResponse.builder().sku("ITEM-1").hasStockMovements(false).build();
+        ItemResponse locked = ItemResponse.builder().sku("ITEM-2").hasStockMovements(true).build();
+
+        when(itemRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class), eq(pageable)))
+            .thenReturn(new PageImpl<>(List.of(withoutMovements, withMovements), pageable, 2));
+        when(stockMovementService.findItemIdsWithStockMovements(List.of(1L, 2L)))
+            .thenReturn(Set.of(2L));
+        when(itemMapper.itemToItemResponse(withoutMovements, false)).thenReturn(unlocked);
+        when(itemMapper.itemToItemResponse(withMovements, true)).thenReturn(locked);
+
+        var result = service.filterItems(filter, pageable);
+
+        assertThat(result.getContent()).containsExactly(unlocked, locked);
+        verify(stockMovementService).findItemIdsWithStockMovements(List.of(1L, 2L));
+        verify(stockMovementService, never()).hasStockMovements(any());
+        verify(itemMapper).itemToItemResponse(withoutMovements, false);
+        verify(itemMapper).itemToItemResponse(withMovements, true);
+    }
+
+    @Test
+    void detailWithoutMovementsExposesActiveAndUnlockedState() {
+        Item item = item(1L, true, true);
+        ItemResponse expected = ItemResponse.builder()
+            .active(true)
+            .hasStockMovements(false)
+            .baseUnitOfMeasureLocked(false)
+            .fractionalQuantityAllowedLocked(false)
+            .build();
+        when(itemRepository.findItemBySku("ITEM-1")).thenReturn(Optional.of(item));
+        when(stockMovementService.hasStockMovements(1L)).thenReturn(false);
+        when(itemMapper.itemToItemResponse(item, false)).thenReturn(expected);
+
+        ItemResponse response = service.getItemDetails("ITEM-1");
+
+        assertThat(response).isSameAs(expected);
+        assertThat(response.isActive()).isTrue();
+        assertThat(response.isBaseUnitOfMeasureLocked()).isFalse();
+    }
+
+    @Test
+    void detailWithMovementsExposesInactiveAndLockedState() {
+        Item item = item(2L, false, true);
+        item.setSku("ITEM-2");
+        ItemResponse expected = ItemResponse.builder()
+            .active(false)
+            .hasStockMovements(true)
+            .baseUnitOfMeasureLocked(true)
+            .fractionalQuantityAllowedLocked(true)
+            .build();
+        when(itemRepository.findItemBySku("ITEM-2")).thenReturn(Optional.of(item));
+        when(stockMovementService.hasStockMovements(2L)).thenReturn(true);
+        when(itemMapper.itemToItemResponse(item, true)).thenReturn(expected);
+
+        ItemResponse response = service.getItemDetails("ITEM-2");
+
+        assertThat(response).isSameAs(expected);
+        assertThat(response.isActive()).isFalse();
+        assertThat(response.isFractionalQuantityAllowedLocked()).isTrue();
+    }
+
+    @Test
+    void baseUomChangeBeforeFirstMovementSucceeds() {
+        Item item = item(42L, true, false);
         UpdateItemRequest request = UpdateItemRequest.builder()
             .baseUnitOfMeasure(UnitOfMeasure.LITER)
             .build();
-        Item item = Item.builder()
-            .id(42L)
-            .sku("FAB-00001")
-            .baseUnitOfMeasure(UnitOfMeasure.METER)
-            .stockStore(BigDecimal.ZERO)
-            .stockWarehouse(BigDecimal.ZERO)
-            .build();
-        when(itemRepository.findItemBySku("FAB-00001")).thenReturn(Optional.of(item));
-        org.mockito.Mockito.doThrow(new BaseUnitOfMeasureImmutableException("FAB-00001"))
-            .when(stockMovementService).validateBaseUnitOfMeasureChange(item, UnitOfMeasure.LITER);
+        stubSuccessfulUpdate(item, request, false);
 
-        assertThat(org.assertj.core.api.Assertions.catchThrowable(
-            () -> service.updateItem("FAB-00001", request)))
+        service.updateItem("ITEM-1", request);
+
+        verify(stockMovementService).validateMeasurementRuleChanges(item, UnitOfMeasure.LITER, null);
+        verify(itemMapper).updateRequestToEntity(request, item);
+    }
+
+    @Test
+    void baseUomChangeAfterFirstMovementIsRejected() {
+        Item item = item(42L, true, false);
+        UpdateItemRequest request = UpdateItemRequest.builder()
+            .baseUnitOfMeasure(UnitOfMeasure.LITER)
+            .build();
+        when(itemRepository.findItemBySku("ITEM-1")).thenReturn(Optional.of(item));
+        doThrow(new BaseUnitOfMeasureImmutableException("ITEM-1"))
+            .when(stockMovementService)
+            .validateMeasurementRuleChanges(item, UnitOfMeasure.LITER, null);
+
+        assertThatThrownBy(() -> service.updateItem("ITEM-1", request))
             .isInstanceOf(BaseUnitOfMeasureImmutableException.class);
 
         verify(itemMapper, never()).updateRequestToEntity(request, item);
         verify(itemRepository, never()).saveAndFlush(item);
+    }
+
+    @Test
+    void fractionalPolicyChangeBeforeFirstMovementSucceeds() {
+        Item item = item(42L, true, false);
+        UpdateItemRequest request = UpdateItemRequest.builder()
+            .fractionalQuantityAllowed(true)
+            .build();
+        stubSuccessfulUpdate(item, request, false);
+
+        service.updateItem("ITEM-1", request);
+
+        verify(stockMovementService).validateMeasurementRuleChanges(item, null, true);
+        verify(itemMapper).updateRequestToEntity(request, item);
+    }
+
+    @Test
+    void fractionalPolicyChangeAfterFirstMovementIsRejected() {
+        Item item = item(42L, true, false);
+        UpdateItemRequest request = UpdateItemRequest.builder()
+            .fractionalQuantityAllowed(true)
+            .build();
+        when(itemRepository.findItemBySku("ITEM-1")).thenReturn(Optional.of(item));
+        doThrow(new FractionalQuantityPolicyImmutableException("ITEM-1"))
+            .when(stockMovementService)
+            .validateMeasurementRuleChanges(item, null, true);
+
+        assertThatThrownBy(() -> service.updateItem("ITEM-1", request))
+            .isInstanceOf(FractionalQuantityPolicyImmutableException.class);
+
+        verify(itemMapper, never()).updateRequestToEntity(request, item);
+        verify(itemRepository, never()).saveAndFlush(item);
+    }
+
+    @Test
+    void unchangedMeasurementRulesAfterMovementAreAccepted() {
+        Item item = item(42L, true, false);
+        UpdateItemRequest request = UpdateItemRequest.builder()
+            .baseUnitOfMeasure(UnitOfMeasure.METER)
+            .fractionalQuantityAllowed(false)
+            .build();
+        ItemResponse expected = stubSuccessfulUpdate(item, request, true);
+
+        ItemResponse response = service.updateItem("ITEM-1", request);
+
+        assertThat(response).isSameAs(expected);
+        verify(itemMapper).itemToItemResponse(item, true);
+    }
+
+    private ItemResponse stubSuccessfulUpdate(
+        Item item,
+        UpdateItemRequest request,
+        boolean hasStockMovements
+    ) {
+        ItemResponse response = ItemResponse.builder()
+            .sku(item.getSku())
+            .hasStockMovements(hasStockMovements)
+            .build();
+        when(itemRepository.findItemBySku(item.getSku())).thenReturn(Optional.of(item));
+        when(stockMovementService.validateMeasurementRuleChanges(
+            item,
+            request.getBaseUnitOfMeasure(),
+            request.getFractionalQuantityAllowed()
+        )).thenReturn(hasStockMovements);
+        when(itemRepository.saveAndFlush(item)).thenReturn(item);
+        when(itemMapper.itemToItemResponse(item, hasStockMovements)).thenReturn(response);
+        return response;
+    }
+
+    private Item item(Long id, boolean active, boolean fractionalQuantityAllowed) {
+        return Item.builder()
+            .id(id)
+            .sku("ITEM-1")
+            .baseUnitOfMeasure(UnitOfMeasure.METER)
+            .fractionalQuantityAllowed(fractionalQuantityAllowed)
+            .stockStore(BigDecimal.ZERO)
+            .stockWarehouse(BigDecimal.ZERO)
+            .active(active)
+            .build();
     }
 }

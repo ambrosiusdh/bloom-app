@@ -5,6 +5,7 @@ import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
+import com.bloom.app.domain.exception.FractionalQuantityPolicyImmutableException;
 import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.model.*;
@@ -19,8 +20,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.math.BigDecimal;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -194,14 +198,43 @@ public class StockMovementServiceImpl implements StockMovementService {
 
     @Override
     @Transactional(readOnly = true)
-    public void validateBaseUnitOfMeasureChange(Item item, UnitOfMeasure requestedUnitOfMeasure) {
-        if (item == null || requestedUnitOfMeasure == null
-                || requestedUnitOfMeasure == item.getBaseUnitOfMeasure()) {
-            return;
+    public boolean validateMeasurementRuleChanges(
+        Item item,
+        UnitOfMeasure requestedUnitOfMeasure,
+        Boolean requestedFractionalQuantityAllowed
+    ) {
+        if (item == null || item.getId() == null) {
+            return false;
         }
-        if (item.getId() != null && stockMovementRepository.existsByProductId(item.getId())) {
+
+        boolean hasStockMovements = hasStockMovements(item.getId());
+        if (!hasStockMovements) {
+            return false;
+        }
+        if (requestedUnitOfMeasure != null
+                && requestedUnitOfMeasure != item.getBaseUnitOfMeasure()) {
             throw new BaseUnitOfMeasureImmutableException(item.getSku());
         }
+        if (requestedFractionalQuantityAllowed != null
+                && requestedFractionalQuantityAllowed != item.isFractionalQuantityAllowed()) {
+            throw new FractionalQuantityPolicyImmutableException(item.getSku());
+        }
+        return true;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean hasStockMovements(Long itemId) {
+        return itemId != null && stockMovementRepository.existsByProductId(itemId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<Long> findItemIdsWithStockMovements(Collection<Long> itemIds) {
+        if (itemIds == null || itemIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+        return stockMovementRepository.findProductIdsWithMovements(itemIds);
     }
 
     private BigDecimal stockAt(Item item, StockLocation stockLocation) {

@@ -28,7 +28,7 @@ Repository names are used where they already exist: `Item`, `Sale`, `SaleItem`, 
 | R1-05 | Money uses `RoundingMode.HALF_UP` at the calculation boundaries documented below. |
 | R1-06 | `Item` has `baseUnitOfMeasure`, `fractionalQuantityAllowed`, `stockStore`, and `stockWarehouse`. |
 | R1-07 | Package conversion, including ROLL-to-METER conversion, is outside Release 1. |
-| R1-08 | An item's `baseUnitOfMeasure` cannot change after that item has any stock movement. |
+| R1-08 | An item's `baseUnitOfMeasure` and `fractionalQuantityAllowed` cannot change after that item has any stock movement. |
 | R1-09 | Every stock mutation goes through `StockMovementService`. |
 | R1-10 | Opening inventory creates `OPENING_BALANCE` stock movements. |
 | R1-11 | Stock cannot become negative. |
@@ -128,6 +128,14 @@ Release 1 does not convert between units. If an item's base UOM is METER, all qu
 
 The exact allowed UOM vocabulary and its Java/database representation remain unresolved. No conversion ratio, package definition, alternate UOM, or UOM hierarchy is implied by `baseUnitOfMeasure`.
 
+### Item inventory read response
+
+The public item list and detail responses expose the same inventory state: `active`, `baseUnitOfMeasure`, `fractionalQuantityAllowed`, `stockStore`, `stockWarehouse`, `hasStockMovements`, `baseUnitOfMeasureLocked`, and `fractionalQuantityAllowedLocked`.
+
+`hasStockMovements` is true when at least one `StockMovement` exists for the item. Both lock fields are true exactly when `hasStockMovements` is true, because both measurement rules become immutable at the first movement. The separate lock fields are retained so clients consume explicit server policy rather than infer it from balances or assume both policies will always evolve together.
+
+`stockStore` and `stockWarehouse` are independent quantities. Clients must not merge them. The legacy `stockQuantity` response field is retained temporarily only for compatibility and is deprecated in the API schema. New and migrated clients must use `stockStore` and `stockWarehouse`; `stockQuantity` is not authoritative for the item inventory read model and will be removed in a later compatibility cleanup.
+
 ### Stock authority
 
 `StockMovement` is the authoritative stock ledger. `Item.stockStore` and `Item.stockWarehouse` are derived, transactionally maintained balance fields for their respective locations.
@@ -154,7 +162,7 @@ An opening quantity is represented by an `IN` movement whose source semantics ar
 8. The after balance must be greater than or equal to zero. The movement and balance update fail atomically if it would be negative.
 9. The saved movement and the applicable `Item` balance must commit in the same transaction.
 10. The two location balances are independent. Availability in `WAREHOUSE` cannot satisfy a `STORE` sale without a separately approved stock transfer operation.
-11. After the first `StockMovement` exists for an item, `baseUnitOfMeasure` is immutable.
+11. After the first `StockMovement` exists for an item, both `baseUnitOfMeasure` and `fractionalQuantityAllowed` are immutable. A request that leaves either value unchanged remains valid.
 12. Historical movements are retained. A stock correction is another movement through `StockMovementService`, not an edit to a prior movement or a direct overwrite of an item balance.
 
 ## Supplier receipt, accounts-payable, and payment contract
@@ -289,7 +297,7 @@ This matrix defines only mutability needed by the approved contract. Fields not 
 
 | Entity or record | Allowed mutation | Immutable boundary | Correction path |
 |---|---|---|---|
-| `Item` | Ordinary master-data maintenance is outside this contract's mutability rules. `baseUnitOfMeasure` may change only while the item has no movements. | `baseUnitOfMeasure` becomes immutable when the first `StockMovement` exists. `stockStore` and `stockWarehouse` are never directly maintained as master data. | Stock changes use `StockMovementService`. UOM conversion is not a correction path in Release 1. |
+| `Item` | Ordinary master-data maintenance is outside this contract's mutability rules. `baseUnitOfMeasure` and `fractionalQuantityAllowed` may change only while the item has no movements. | Both measurement fields become immutable when the first `StockMovement` exists. `stockStore` and `stockWarehouse` are never directly maintained as master data. | Stock changes use `StockMovementService`. UOM or fractional-policy conversion is not a correction path in Release 1. |
 | `StockMovement` | Created once as part of a stock transaction. | Item, location, direction, quantity, source, and before/after balances are immutable after recording. | Record a compensating/correction movement through `StockMovementService`; retain the original. |
 | `Sale` / `SaleItem` | Created as one sale transaction and linked to the open `CashSession`. | The session link, payment method, lines, quantities, unit-price snapshots, and calculated amounts are transaction facts after recording. | Sale void/refund behavior is unresolved; do not edit a recorded sale to simulate it. |
 | `GoodsReceipt` / `GoodsReceiptItem` | Created as one receipt transaction with stock movements and payable impact. | Supplier, receipt lines, quantities, purchase-price snapshots, totals, and resulting movements are transaction facts after recording. | Receipt cancellation/return behavior is unresolved; do not edit a recorded receipt to simulate it. |
@@ -351,10 +359,9 @@ The following are recommendations, not approved product features:
 The approved contract is sufficient for planning, but these decisions are required before the affected implementation can be completed:
 
 1. The allowed `baseUnitOfMeasure` values and whether they are stored as an enum, controlled code, or another representation.
-2. Whether `fractionalQuantityAllowed` may change after movements exist, especially when historical or current balances are fractional.
-3. The precise meaning of `Sale.paidAmount` (for example, sale value versus cash tender) and whether a separate change-due value is needed.
-4. Supplier-payment allocation across receipts, overpayment handling, and the supplier-payment void/reversal policy.
-5. Goods-receipt cancellation/return and sale void/refund lifecycles.
-6. Whether and how an expense mistake discovered after cash-session close is reversed without changing a closed session.
-7. Cash-session reopen policy and authorization, if reopening is to exist at all.
-8. The React web client API contract, because that client is not present in this repository.
+2. The precise meaning of `Sale.paidAmount` (for example, sale value versus cash tender) and whether a separate change-due value is needed.
+3. Supplier-payment allocation across receipts, overpayment handling, and the supplier-payment void/reversal policy.
+4. Goods-receipt cancellation/return and sale void/refund lifecycles.
+5. Whether and how an expense mistake discovered after cash-session close is reversed without changing a closed session.
+6. Cash-session reopen policy and authorization, if reopening is to exist at all.
+7. The React web client API contract, because that client is not present in this repository.

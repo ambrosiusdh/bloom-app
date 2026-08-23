@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.exception.IdempotencyConflictException;
+import com.bloom.app.domain.exception.FractionalQuantityPolicyImmutableException;
 
 import java.util.Map;
 
@@ -57,6 +58,20 @@ class GlobalExceptionHandlerTest {
         assertThat(body.get("errorType")).isEqualTo("IdempotencyConflictException");
         assertThat(body.get("message")).isEqualTo(
             "Idempotency key has already been used for a different stock transfer request");
+    }
+
+    @Test
+    void returnsConflictForFractionalQuantityPolicyChangeAfterMovement() {
+        var response = handler.handleInventoryConflict(
+            new FractionalQuantityPolicyImmutableException("ITEM-1"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        Map<?, ?> body = (Map<?, ?>) response.getBody();
+        assertThat(body.get("code")).isEqualTo(HttpStatus.CONFLICT.value());
+        assertThat(body.get("errorType"))
+            .isEqualTo("FractionalQuantityPolicyImmutableException");
+        assertThat(body.get("message")).isEqualTo(
+            "Fractional quantity policy cannot change after the first stock movement for item: ITEM-1");
     }
 
     @Test
