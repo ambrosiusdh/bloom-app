@@ -14,8 +14,8 @@ import com.bloom.app.persistence.repository.CashSessionRepository;
 import com.bloom.app.service.CashMovementService;
 import com.bloom.app.service.command.RecordCashMovementCommand;
 import com.bloom.app.service.mapper.CashMovementMapper;
-import com.bloom.app.service.support.CashMoney;
-import com.bloom.app.service.support.CurrentActorProvider;
+import com.bloom.app.service.util.CashMoneyUtil;
+import com.bloom.app.service.util.CurrentActorProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -71,7 +71,7 @@ public class CashMovementServiceImpl implements CashMovementService {
 
         BigDecimal signedAmount = prepared.direction() == CashMovementDirection.IN
             ? prepared.amount() : prepared.amount().negate();
-        session.setExpectedClosingCash(CashMoney.reconciliationBoundary(
+        session.setExpectedClosingCash(CashMoneyUtil.reconciliationBoundary(
             session.getExpectedClosingCash().add(signedAmount)));
         cashSessionRepository.saveAndFlush(session);
         return cashMovementMapper.toResponse(saved);
@@ -91,7 +91,7 @@ public class CashMovementServiceImpl implements CashMovementService {
             throw new IllegalArgumentException("Cash movement source ID must be positive");
         }
         String reference = normalizeRequired(command.referenceNo(), "Cash movement reference");
-        BigDecimal amount = CashMoney.requirePositive(command.amount(), "Cash movement amount");
+        BigDecimal amount = CashMoneyUtil.requirePositive(command.amount(), "Cash movement amount");
         return new PreparedMovement(
             command,
             command.sessionId(),

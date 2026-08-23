@@ -1,4 +1,4 @@
-package com.bloom.app.service.support;
+package com.bloom.app.service.util;
 
 public final class CashSessionLockConstants {
     /** Stable PostgreSQL advisory-lock namespace for the one-register transition. */

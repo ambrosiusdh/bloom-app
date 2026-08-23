@@ -1,10 +1,10 @@
-package com.bloom.app.service.support;
+package com.bloom.app.service.util;
 
 import com.bloom.app.domain.model.User;
 import com.bloom.app.persistence.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 

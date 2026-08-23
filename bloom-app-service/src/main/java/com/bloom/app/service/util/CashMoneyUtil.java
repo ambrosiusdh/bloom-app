@@ -1,13 +1,13 @@
-package com.bloom.app.service.support;
+package com.bloom.app.service.util;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
-public final class CashMoney {
+public final class CashMoneyUtil {
     public static final int SCALE = 4;
     private static final int MAX_PRECISION = 19;
 
-    private CashMoney() {
+    private CashMoneyUtil() {
     }
 
     public static BigDecimal requireNonNegative(BigDecimal value, String fieldName) {

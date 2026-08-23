@@ -14,10 +14,10 @@ import com.bloom.app.persistence.repository.CashSessionRepository;
 import com.bloom.app.service.CashSessionService;
 import com.bloom.app.service.mapper.CashMovementMapper;
 import com.bloom.app.service.mapper.CashSessionMapper;
-import com.bloom.app.service.support.CashMoney;
-import com.bloom.app.service.support.CashReconciliationCalculator;
-import com.bloom.app.service.support.CashSessionLockConstants;
-import com.bloom.app.service.support.CurrentActorProvider;
+import com.bloom.app.service.util.CashMoneyUtil;
+import com.bloom.app.service.util.CashReconciliationCalculator;
+import com.bloom.app.service.util.CashSessionLockConstants;
+import com.bloom.app.service.util.CurrentActorProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -46,7 +46,7 @@ public class CashSessionServiceImpl implements CashSessionService {
         if (request == null) {
             throw new IllegalArgumentException("Open cash session request is required");
         }
-        BigDecimal openingCash = CashMoney.requireNonNegative(
+        BigDecimal openingCash = CashMoneyUtil.requireNonNegative(
             request.getOpeningCash(), "Opening cash");
 
         cashSessionRepository.lockGlobalSessionTransition(
@@ -123,7 +123,7 @@ public class CashSessionServiceImpl implements CashSessionService {
         if (request == null) {
             throw new IllegalArgumentException("Close cash session request is required");
         }
-        BigDecimal actualClosingCash = CashMoney.requireNonNegative(
+        BigDecimal actualClosingCash = CashMoneyUtil.requireNonNegative(
             request.getActualClosingCash(), "Actual closing cash");
 
         cashSessionRepository.lockGlobalSessionTransition(
@@ -138,7 +138,7 @@ public class CashSessionServiceImpl implements CashSessionService {
             reconciliationCalculator.calculate(session);
         session.setExpectedClosingCash(calculation.expectedClosingCash());
         session.setActualClosingCash(actualClosingCash);
-        session.setDifference(CashMoney.reconciliationBoundary(
+        session.setDifference(CashMoneyUtil.reconciliationBoundary(
             actualClosingCash.subtract(calculation.expectedClosingCash())));
         session.setClosedAt(Instant.now());
         session.setClosedBy(currentActorProvider.user());
