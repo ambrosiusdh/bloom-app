@@ -162,7 +162,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsBaselineStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("14");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("15");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
@@ -205,6 +205,8 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(columnExists("sales", "checkout_idempotency_key")).isTrue();
         assertThat(columnExists("sales", "checkout_request_hash")).isTrue();
         assertThat(columnExists("expenses", "version")).isTrue();
+        assertThat(columnExists("expenses", "voided_at")).isTrue();
+        assertThat(columnExists("expenses", "voided_by")).isTrue();
         assertThat(columnExists("item_category_counters", "version")).isFalse();
         assertThat(constraintExists(
             "item_category_counters",
@@ -230,6 +232,8 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(indexExists("idx_stock_movements_product_history")).isTrue();
         assertThat(indexExists("uq_cash_sessions_single_open")).isTrue();
         assertThat(indexExists("uq_cash_movements_idempotency_key")).isTrue();
+        assertThat(indexExists("uq_cash_movements_expense_posting")).isTrue();
+        assertThat(indexExists("uq_cash_movements_expense_reversal")).isTrue();
         assertThat(indexExists("idx_sales_cash_session_id")).isTrue();
 
         assertThat(numericScale("items", "price")).isEqualTo(4);

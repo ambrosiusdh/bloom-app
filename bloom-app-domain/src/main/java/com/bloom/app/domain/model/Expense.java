@@ -47,6 +47,12 @@ public class Expense {
     @Column(name = "voided_reason")
     private String voidedReason;
 
+    @Column(name = "voided_at")
+    private Instant voidedAt;
+
+    @Column(name = "voided_by")
+    private String voidedBy;
+
     @Column(updatable = false)
     @CreatedDate
     private Instant createdAt;
