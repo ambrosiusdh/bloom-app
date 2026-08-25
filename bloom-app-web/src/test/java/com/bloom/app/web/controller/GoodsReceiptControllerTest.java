@@ -133,4 +133,30 @@ class GoodsReceiptControllerTest {
             .andExpect(jsonPath("$.data.status").value("CANCELLED"))
             .andExpect(jsonPath("$.data.cancellationReason").value("Supplier return"));
     }
+
+    @Test
+    void mapsDomainArgumentValidationToBadRequest() throws Exception {
+        when(goodsReceiptService.createGoodsReceipt(eq("inactive-supplier"), any()))
+            .thenThrow(new IllegalArgumentException("Supplier must be active: SUP-1"));
+
+        mockMvc.perform(post("/api/goods-receipts")
+                .header("Idempotency-Key", "inactive-supplier")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {
+                      "receivedDate":"2026-08-25T10:00:00Z",
+                      "supplierCode":"SUP-1",
+                      "items":[{
+                        "itemSku":"ITEM-1",
+                        "quantity":1.0000,
+                        "purchasePrice":1.0000,
+                        "stockLocation":"STORE"
+                      }]
+                    }
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.errorType").value("IllegalArgumentException"))
+            .andExpect(jsonPath("$.message").value("Supplier must be active: SUP-1"));
+    }
 }

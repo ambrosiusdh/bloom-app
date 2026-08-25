@@ -46,7 +46,10 @@ public class GoodsReceiptController {
         description = "Cancel a posted receipt with compensating stock movements."
     )
     public ResponseEntity<ApiResponse<GoodsReceiptResponse>> cancelGoodsReceipt(
-        @PathVariable String code,
+        @PathVariable
+        @NotBlank(message = "Goods receipt code is required")
+        @Size(max = 100, message = "Goods receipt code must not exceed 100 characters")
+        String code,
         @Valid @RequestBody CancelGoodsReceiptRequest request
     ) {
         return ResponseHelper.ok(goodsReceiptService.cancelGoodsReceipt(code, request));
@@ -54,7 +57,12 @@ public class GoodsReceiptController {
 
     @GetMapping("/details")
     @Operation(summary = "Get Details Goods Receipt", description = "Get details of a specific goods receipt by code.")
-    public ResponseEntity<ApiResponse<GoodsReceiptResponse>> getGoodsReceiptDetails(@RequestParam String code) {
+    public ResponseEntity<ApiResponse<GoodsReceiptResponse>> getGoodsReceiptDetails(
+        @RequestParam
+        @NotBlank(message = "Goods receipt code is required")
+        @Size(max = 100, message = "Goods receipt code must not exceed 100 characters")
+        String code
+    ) {
         GoodsReceiptResponse response = goodsReceiptService.getGoodsReceiptDetails(code);
         return ResponseHelper.ok(response);
     }

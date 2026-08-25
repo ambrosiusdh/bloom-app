@@ -44,7 +44,7 @@ public class GoodsReceipt {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "code", unique = true, nullable = false, updatable = false)
+    @Column(name = "code", length = 100, unique = true, nullable = false, updatable = false)
     private String code;
 
     @Column(name = "received_date", nullable = false, updatable = false)

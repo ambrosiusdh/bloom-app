@@ -231,6 +231,17 @@ class GoodsReceiptPostgreSqlIntegrationTest {
         assertThat(stockMovementRepository.findByProductId(item.getId())).isEmpty();
     }
 
+    @Test
+    void rejectsReceiptCodesBeyondTheDatabaseLimitBeforeLookupOrCancellation() {
+        assertThatThrownBy(() -> goodsReceiptService.getGoodsReceiptDetails("G".repeat(101)))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Goods receipt code must not exceed 100 characters");
+        assertThatThrownBy(() -> goodsReceiptService.cancelGoodsReceipt(
+            "G".repeat(101), CancelGoodsReceiptRequest.builder().reason("Invalid code").build()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Goods receipt code must not exceed 100 characters");
+    }
+
     private Supplier supplier(boolean active) {
         String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         return supplierRepository.saveAndFlush(Supplier.builder()

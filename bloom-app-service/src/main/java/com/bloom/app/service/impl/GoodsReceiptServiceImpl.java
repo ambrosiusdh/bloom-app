@@ -58,6 +58,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 100;
+    private static final int MAX_RECEIPT_CODE_LENGTH = 100;
 
     private final GoodsReceiptRepository goodsReceiptRepository;
     private final ItemRepository itemRepository;
@@ -325,6 +326,11 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         if (code == null || code.isBlank()) {
             throw new IllegalArgumentException("Goods receipt code is required");
         }
-        return code.trim();
+        String normalizedCode = code.trim();
+        if (normalizedCode.length() > MAX_RECEIPT_CODE_LENGTH) {
+            throw new IllegalArgumentException(
+                "Goods receipt code must not exceed " + MAX_RECEIPT_CODE_LENGTH + " characters");
+        }
+        return normalizedCode;
     }
 }
