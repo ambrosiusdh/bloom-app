@@ -20,6 +20,7 @@ import com.bloom.app.service.mapper.StockAdjustmentMapper;
 import com.bloom.app.service.mapper.StockMovementMapper;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.server.ResponseStatusException;
@@ -32,6 +33,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -71,22 +73,24 @@ class StockAdjustmentServiceImplTest {
             .stockStore(new BigDecimal("5.0000"))
             .stockWarehouse(BigDecimal.ZERO)
             .build();
-        StockAdjustment adjustment = StockAdjustment.builder().build();
         StockAdjustmentResponse expectedResponse = StockAdjustmentResponse.builder().build();
         StockMovement persistedMovement = StockMovement.builder().id(41L).build();
         StockMovementResponse movementResponse = StockMovementResponse.builder().id(41L).build();
 
-        when(stockAdjustmentMapper.createRequestToEntity(request)).thenReturn(adjustment);
         when(itemRepository.findItemBySku("ITEM-1")).thenReturn(java.util.Optional.of(item));
         when(documentCounterService.generateNextCode(DocumentType.STOCK_ADJUSTMENT)).thenReturn("SA-1");
-        when(stockAdjustmentRepository.save(adjustment)).thenReturn(adjustment);
-        when(stockMovementService.recordManualAdjustment(adjustment))
+        when(stockAdjustmentRepository.save(any(StockAdjustment.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        when(stockMovementService.recordManualAdjustment(any(StockAdjustment.class)))
             .thenReturn(List.of(persistedMovement));
         when(stockMovementMapper.toResponse(persistedMovement)).thenReturn(movementResponse);
-        when(stockAdjustmentMapper.toResponse(adjustment)).thenReturn(expectedResponse);
+        when(stockAdjustmentMapper.toResponse(any(StockAdjustment.class))).thenReturn(expectedResponse);
 
         CreateStockAdjustmentResponse response = service.createStockAdjustment(request);
 
+        ArgumentCaptor<StockAdjustment> adjustmentCaptor = ArgumentCaptor.forClass(StockAdjustment.class);
+        verify(stockAdjustmentRepository).save(adjustmentCaptor.capture());
+        StockAdjustment adjustment = adjustmentCaptor.getValue();
         assertThat(response.getAdjustment()).isSameAs(expectedResponse);
         assertThat(response.getMovements()).containsExactly(movementResponse);
         assertThat(adjustment.getItems()).hasSize(1);
@@ -116,16 +120,17 @@ class StockAdjustmentServiceImplTest {
             .build();
         Item addItem = item("ADD-ITEM", "2.0000", "0.0000");
         Item removeItem = item("REMOVE-ITEM", "0.0000", "2.0000");
-        StockAdjustment adjustment = StockAdjustment.builder().build();
-
-        when(stockAdjustmentMapper.createRequestToEntity(request)).thenReturn(adjustment);
         when(itemRepository.findItemBySku("ADD-ITEM")).thenReturn(java.util.Optional.of(addItem));
         when(itemRepository.findItemBySku("REMOVE-ITEM")).thenReturn(java.util.Optional.of(removeItem));
         when(documentCounterService.generateNextCode(DocumentType.STOCK_ADJUSTMENT)).thenReturn("SA-1");
-        when(stockAdjustmentRepository.save(adjustment)).thenReturn(adjustment);
+        when(stockAdjustmentRepository.save(any(StockAdjustment.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
 
         service.createStockAdjustment(request);
 
+        ArgumentCaptor<StockAdjustment> adjustmentCaptor = ArgumentCaptor.forClass(StockAdjustment.class);
+        verify(stockAdjustmentRepository).save(adjustmentCaptor.capture());
+        StockAdjustment adjustment = adjustmentCaptor.getValue();
         assertThat(adjustment.getItems().getFirst().getPreviousStock()).isEqualByComparingTo("2.0000");
         assertThat(adjustment.getItems().get(0).getNewStock()).isEqualByComparingTo("3.2500");
         assertThat(adjustment.getItems().get(0).getChangeQuantity()).isEqualByComparingTo("1.2500");
@@ -147,9 +152,6 @@ class StockAdjustmentServiceImplTest {
             .items(List.of(itemRequest))
             .reason("Physical recount")
             .build();
-        StockAdjustment adjustment = StockAdjustment.builder().build();
-
-        when(stockAdjustmentMapper.createRequestToEntity(request)).thenReturn(adjustment);
         when(itemRepository.findItemBySku("ITEM-1"))
             .thenReturn(java.util.Optional.of(item("ITEM-1", "1.0000", "0.0000")));
 
@@ -157,8 +159,8 @@ class StockAdjustmentServiceImplTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("Stock may not be negative");
 
-        verify(stockAdjustmentRepository, never()).save(adjustment);
-        verify(stockMovementService, never()).recordManualAdjustment(adjustment);
+        verify(stockAdjustmentRepository, never()).save(any(StockAdjustment.class));
+        verify(stockMovementService, never()).recordManualAdjustment(any(StockAdjustment.class));
     }
 
     @Test
@@ -173,9 +175,6 @@ class StockAdjustmentServiceImplTest {
             .reason("Physical recount")
             .items(List.of(itemRequest))
             .build();
-        StockAdjustment adjustment = StockAdjustment.builder().build();
-
-        when(stockAdjustmentMapper.createRequestToEntity(request)).thenReturn(adjustment);
         when(itemRepository.findItemBySku("ITEM-1"))
             .thenReturn(java.util.Optional.of(item("ITEM-1", "1.0000", "0.0000")));
 
@@ -183,8 +182,8 @@ class StockAdjustmentServiceImplTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("Correction target must differ from current stock");
 
-        verify(stockAdjustmentRepository, never()).save(adjustment);
-        verify(stockMovementService, never()).recordManualAdjustment(adjustment);
+        verify(stockAdjustmentRepository, never()).save(any(StockAdjustment.class));
+        verify(stockMovementService, never()).recordManualAdjustment(any(StockAdjustment.class));
     }
 
     @Test
@@ -199,17 +198,18 @@ class StockAdjustmentServiceImplTest {
             .reason("  Physical recount  ")
             .items(List.of(itemRequest))
             .build();
-        StockAdjustment adjustment = StockAdjustment.builder().build();
-
-        when(stockAdjustmentMapper.createRequestToEntity(request)).thenReturn(adjustment);
         when(itemRepository.findItemBySku("ITEM-1"))
             .thenReturn(java.util.Optional.of(item("ITEM-1", "1.0000", "0.0000")));
         when(documentCounterService.generateNextCode(DocumentType.STOCK_ADJUSTMENT)).thenReturn("SA-1");
-        when(stockAdjustmentRepository.save(adjustment)).thenReturn(adjustment);
-        when(stockMovementService.recordManualAdjustment(adjustment)).thenReturn(List.of());
+        when(stockAdjustmentRepository.save(any(StockAdjustment.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        when(stockMovementService.recordManualAdjustment(any(StockAdjustment.class))).thenReturn(List.of());
 
         service.createStockAdjustment(request);
 
+        ArgumentCaptor<StockAdjustment> adjustmentCaptor = ArgumentCaptor.forClass(StockAdjustment.class);
+        verify(stockAdjustmentRepository).save(adjustmentCaptor.capture());
+        StockAdjustment adjustment = adjustmentCaptor.getValue();
         assertThat(adjustment.getReason()).isEqualTo("Physical recount");
     }
 

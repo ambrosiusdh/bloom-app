@@ -64,8 +64,9 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
     public CreateStockAdjustmentResponse createStockAdjustment(CreateStockAdjustmentRequest request) {
         log.debug("StockAdjustmentService createStockAdjustment with request: {}", request);
 
-        StockAdjustment stockAdjustment = stockAdjustmentMapper.createRequestToEntity(request);
-        stockAdjustment.setReason(normalizeReason(request.getReason()));
+        StockAdjustment stockAdjustment = StockAdjustment.builder()
+            .reason(normalizeReason(request.getReason()))
+            .build();
         List<StockAdjustmentItem> stockAdjustmentItems = new ArrayList<>();
 
         if (request.getItems() == null || request.getItems().isEmpty()) {
