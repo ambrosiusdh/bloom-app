@@ -29,6 +29,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/cash-sessions")
 @RequiredArgsConstructor
 public class CashSessionController {
+    private static final String NO_OPEN_SESSION_MESSAGE =
+        "No cash session is currently open";
+
     private final CashSessionService cashSessionService;
 
     @PostMapping("/open")
@@ -40,9 +43,15 @@ public class CashSessionController {
     }
 
     @GetMapping("/current")
-    @Operation(summary = "Get the globally open cash session")
+    @Operation(
+        summary = "Get the globally open cash session",
+        description = "Returns the open cash session when present. Because this is a zero-or-one "
+            + "state, HTTP 200 with data null is returned when no session is open."
+    )
     public ResponseEntity<ApiResponse<CashSessionResponse>> getCurrentSession() {
-        return ResponseHelper.ok(cashSessionService.getCurrentSession());
+        return cashSessionService.getCurrentSession()
+            .map(ResponseHelper::ok)
+            .orElseGet(() -> ResponseHelper.ok(NO_OPEN_SESSION_MESSAGE, null));
     }
 
     @GetMapping("/{sessionId}")

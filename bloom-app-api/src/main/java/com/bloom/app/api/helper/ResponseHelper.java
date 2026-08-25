@@ -9,6 +9,10 @@ public class ResponseHelper {
         return ResponseEntity.ok(ApiResponse.ok(data));
     }
 
+    public static <T> ResponseEntity<ApiResponse<T>> ok(String message, T data) {
+        return ResponseEntity.ok(ApiResponse.ok(message, data));
+    }
+
     public static <T> ResponseEntity<ApiResponse<T>> created(String msg, T data) {
         return ResponseEntity.status(HttpStatus.CREATED).body(new ApiResponse<>(true, msg, 201, data));
     }
