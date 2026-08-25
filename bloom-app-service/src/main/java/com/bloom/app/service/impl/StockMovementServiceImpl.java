@@ -177,6 +177,20 @@ public class StockMovementServiceImpl implements StockMovementService {
         }
     }
 
+    @Override
+    @Transactional
+    public void recordGoodsReceiptPosting(GoodsReceipt receipt) {
+        recordGoodsReceiptMovements(
+            receipt, MovementSourceType.GOODS_RECEIPT, MovementType.IN);
+    }
+
+    @Override
+    @Transactional
+    public void recordGoodsReceiptCancellation(GoodsReceipt receipt) {
+        recordGoodsReceiptMovements(
+            receipt, MovementSourceType.GOODS_RECEIPT_CANCELLATION, MovementType.OUT);
+    }
+
     // Helper for Manual Adjustments
     @Transactional
     public List<StockMovement> recordManualAdjustment(StockAdjustment adjustment) {
@@ -249,6 +263,56 @@ public class StockMovementServiceImpl implements StockMovementService {
         return stock == null ? BigDecimal.ZERO : stock;
     }
 
+    private void recordGoodsReceiptMovements(
+            GoodsReceipt receipt,
+            MovementSourceType sourceType,
+            MovementType movementType) {
+        if (receipt == null || receipt.getId() == null) {
+            throw new IllegalArgumentException("Goods receipt must be persisted before recording stock");
+        }
+        Map<StockKey, ReceiptMovement> movements = new LinkedHashMap<>();
+        for (GoodsReceiptItem line : receipt.getItems()) {
+            if (line == null || line.getItem() == null || line.getItem().getId() == null) {
+                throw new IllegalArgumentException("Persisted goods receipt line is required");
+            }
+            InventoryQuantityValidator.validateIncoming(
+                line.getQuantity(), line.getItem().isFractionalQuantityAllowed());
+            StockKey key = new StockKey(line.getItem().getId(), line.getStockLocation());
+            movements.merge(
+                key,
+                new ReceiptMovement(line.getItem(), line.getStockLocation(), line.getQuantity()),
+                (existing, incoming) -> new ReceiptMovement(
+                    existing.item(),
+                    existing.stockLocation(),
+                    existing.quantity().add(incoming.quantity()))
+            );
+        }
+        movements.values().stream()
+            .sorted(java.util.Comparator
+                .comparing((ReceiptMovement movement) -> movement.item().getId())
+                .thenComparing(movement -> movement.stockLocation().name()))
+            .forEach(movement -> {
+                boolean alreadyRecorded = stockMovementRepository
+                    .existsBySourceTypeAndSourceIdAndProduct_IdAndStockLocation(
+                        sourceType,
+                        receipt.getId(),
+                        movement.item().getId(),
+                        movement.stockLocation()
+                    );
+                if (!alreadyRecorded) {
+                    recordMovement(
+                        sourceType,
+                        receipt.getId(),
+                        movement.item(),
+                        movement.quantity(),
+                        movementType,
+                        receipt.getCode(),
+                        movement.stockLocation()
+                    );
+                }
+            });
+    }
+
     private AdjustmentMovement adjustmentMovement(StockAdjustmentItem item) {
         if (item == null || item.getItem() == null || item.getActionType() == null) {
             throw new IllegalArgumentException("Complete stock adjustment item is required");
@@ -299,6 +363,9 @@ public class StockMovementServiceImpl implements StockMovementService {
     }
 
     private record SaleMovement(Item item, StockLocation stockLocation, BigDecimal quantity) {
+    }
+
+    private record ReceiptMovement(Item item, StockLocation stockLocation, BigDecimal quantity) {
     }
 
     private record AdjustmentMovement(MovementType movementType, BigDecimal quantity) {

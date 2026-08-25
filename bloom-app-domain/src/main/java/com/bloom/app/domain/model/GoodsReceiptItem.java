@@ -35,21 +35,28 @@ public class GoodsReceiptItem {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "goods_receipt_id", nullable = false)
+    @JoinColumn(name = "goods_receipt_id", nullable = false, updatable = false)
     private GoodsReceipt goodsReceipt;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "item_id", nullable = false)
+    @JoinColumn(name = "item_id", nullable = false, updatable = false)
     private Item item;
 
-    @Column(name = "quantity", nullable = false, precision = 19, scale = 4)
+    @Column(name = "quantity", nullable = false, precision = 19, scale = 4, updatable = false)
     private BigDecimal quantity;
 
-    @Column(name = "purchase_price", nullable = false, precision = 19, scale = 4)
+    @Column(name = "purchase_price", nullable = false, precision = 19, scale = 4, updatable = false)
     private BigDecimal purchasePrice;
 
+    @Column(name = "line_total", nullable = false, precision = 19, scale = 4, updatable = false)
+    private BigDecimal lineTotal;
+
     @Enumerated(EnumType.STRING)
-    @Column(name = "stock_location", nullable = false)
+    @Column(name = "base_unit_of_measure", nullable = false, length = 30, updatable = false)
+    private UnitOfMeasure baseUnitOfMeasure;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "stock_location", nullable = false, updatable = false)
     private StockLocation stockLocation;
 
 }

@@ -8,6 +8,7 @@ import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.StockAdjustment;
 import com.bloom.app.domain.model.StockMovement;
 import com.bloom.app.domain.model.UnitOfMeasure;
+import com.bloom.app.domain.model.GoodsReceipt;
 
 import java.math.BigDecimal;
 import java.util.Collection;
@@ -25,6 +26,8 @@ public interface StockMovementService {
         StockLocation stockLocation
     );
     void recordSaleMovements(Sale sale);
+    void recordGoodsReceiptPosting(GoodsReceipt receipt);
+    void recordGoodsReceiptCancellation(GoodsReceipt receipt);
     List<StockMovement> recordManualAdjustment(StockAdjustment adjustment);
     boolean validateMeasurementRuleChanges(
         Item item,

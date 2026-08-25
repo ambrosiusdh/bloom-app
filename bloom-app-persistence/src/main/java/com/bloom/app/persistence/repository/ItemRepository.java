@@ -23,6 +23,10 @@ public interface ItemRepository extends JpaRepository<Item, Long>, JpaSpecificat
     @Query("SELECT i FROM Item i WHERE i.sku IN :skus ORDER BY i.id")
     List<Item> findBySkuInOrderByIdForUpdate(@Param("skus") List<String> skus);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM Item i WHERE i.id IN :ids ORDER BY i.id")
+    List<Item> findByIdInOrderByIdForUpdate(@Param("ids") List<Long> ids);
+
     // TODO: improve this query, either total stock need to be recorded or else
     @Query("SELECT i FROM Item i WHERE (i.stockStore + i.stockWarehouse) < :quantity")
     List<Item> findByStockQuantityLessThan(@Param("quantity") BigDecimal quantity);

@@ -170,7 +170,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsBaselineStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("16");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("17");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
@@ -198,6 +198,12 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(columnExists("items", "stock_quantity")).isTrue();
         assertThat(tableExists("suppliers")).isTrue();
         assertThat(columnExists("suppliers", "active")).isTrue();
+        assertThat(columnExists("goods_receipts", "create_idempotency_key")).isTrue();
+        assertThat(columnExists("goods_receipts", "create_request_hash")).isTrue();
+        assertThat(columnExists("goods_receipts", "status")).isTrue();
+        assertThat(columnExists("goods_receipts", "cancellation_reason")).isTrue();
+        assertThat(columnExists("goods_receipt_items", "base_unit_of_measure")).isTrue();
+        assertThat(columnExists("goods_receipt_items", "line_total")).isTrue();
         assertThat(tableExists("cash_sessions")).isTrue();
         assertThat(tableExists("cash_movements")).isTrue();
         assertThat(tableExists("expenses")).isTrue();
@@ -236,6 +242,8 @@ class PostgreSqlMigrationAndContextTest {
             "chk_stock_movements_adjustment_action"
         )).isTrue();
         assertThat(indexExists("uq_stock_movements_sale_item_location")).isTrue();
+        assertThat(indexExists("uq_stock_movements_goods_receipt_item_location")).isTrue();
+        assertThat(indexExists("uq_stock_movements_goods_receipt_cancel_item_location")).isTrue();
         assertThat(indexExists("uq_stock_movements_transfer_item_location")).isTrue();
         assertThat(indexExists("idx_stock_transfers_history_order")).isTrue();
         assertThat(indexExists("idx_stock_transfer_lines_item_transfer")).isTrue();
@@ -260,6 +268,7 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(numericScale("goods_receipts", "total_amount")).isEqualTo(4);
         assertThat(numericScale("goods_receipts", "paid_amount")).isEqualTo(4);
         assertThat(numericScale("goods_receipt_items", "purchase_price")).isEqualTo(4);
+        assertThat(numericScale("goods_receipt_items", "line_total")).isEqualTo(4);
         assertThat(numericScale("cash_sessions", "opening_cash")).isEqualTo(4);
         assertThat(numericScale("cash_sessions", "expected_closing_cash")).isEqualTo(4);
         assertThat(numericScale("cash_sessions", "actual_closing_cash")).isEqualTo(4);
@@ -350,9 +359,12 @@ class PostgreSqlMigrationAndContextTest {
         jdbcTemplate.update("""
             INSERT INTO goods_receipts (
                 code, received_date, supplier_name, description, created_at, created_by,
-                supplier_id, total_amount, paid_amount
-            ) VALUES (?, CURRENT_TIMESTAMP, ?, NULL, CURRENT_TIMESTAMP, 'test', ?, 10.0000, 0.0000)
-            """, "GR-" + suffix, activeSupplier.getName(), activeSupplier.getId());
+                supplier_id, total_amount, paid_amount, create_idempotency_key,
+                create_request_hash, status, version
+            ) VALUES (?, CURRENT_TIMESTAMP, ?, NULL, CURRENT_TIMESTAMP, 'test', ?, 10.0000, 0.0000,
+                ?, REPEAT('0', 64), 'POSTED', 0)
+            """, "GR-" + suffix, activeSupplier.getName(), activeSupplier.getId(),
+            "test-receipt-" + suffix);
 
         assertThat(applicationContext.getBean(com.bloom.app.persistence.repository.GoodsReceiptRepository.class)
             .existsBySupplierId(activeSupplier.getId())).isTrue();
