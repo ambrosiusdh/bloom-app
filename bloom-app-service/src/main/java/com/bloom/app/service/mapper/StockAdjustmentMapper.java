@@ -12,6 +12,7 @@ public interface StockAdjustmentMapper {
     @Mapping(target = "stockAdjustmentCode", ignore = true)
     @Mapping(target = "createdBy", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
+    @Mapping(target = "reason", ignore = true)
     @Mapping(target = "items", ignore = true)
     StockAdjustment createRequestToEntity(CreateStockAdjustmentRequest request);
 
