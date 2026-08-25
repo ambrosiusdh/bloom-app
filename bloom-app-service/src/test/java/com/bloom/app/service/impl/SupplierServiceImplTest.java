@@ -92,6 +92,24 @@ class SupplierServiceImplTest {
     }
 
     @Test
+    void updateTreatsNullAsUnchangedAndBlankAsCleared() {
+        Supplier supplier = supplier(10L, "SUP-001", true);
+        supplier.setContactNumber("021-555");
+        supplier.setAddress("Jakarta");
+        UpdateSupplierRequest request = UpdateSupplierRequest.builder()
+            .contactNumber(null)
+            .address(" ")
+            .build();
+        when(supplierRepository.findByCode("SUP-001")).thenReturn(Optional.of(supplier));
+        when(supplierRepository.saveAndFlush(supplier)).thenReturn(supplier);
+
+        var response = service.updateSupplier("SUP-001", request);
+
+        assertThat(response.getContactNumber()).isEqualTo("021-555");
+        assertThat(response.getAddress()).isNull();
+    }
+
+    @Test
     void activationSupportsDeactivationAndReactivationWithoutChangingCode() {
         Supplier supplier = supplier(10L, "SUP-001", true);
         when(supplierRepository.findByCode("SUP-001")).thenReturn(Optional.of(supplier));

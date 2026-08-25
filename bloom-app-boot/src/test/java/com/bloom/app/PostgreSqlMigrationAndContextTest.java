@@ -327,6 +327,10 @@ class PostgreSqlMigrationAndContextTest {
                 .build()),
             PageRequest.of(0, 10)
         );
+        Page<Supplier> defaultLifecycleResults = supplierRepository.findAll(
+            SupplierSpecification.filter(FilterSupplierRequest.builder().build()),
+            PageRequest.of(0, 100)
+        );
 
         assertThat(activeResults.getContent())
             .extracting(Supplier::getCode)
@@ -334,6 +338,10 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(inactiveResults.getContent())
             .extracting(Supplier::getCode)
             .containsExactly("SUP-I-" + suffix);
+        assertThat(defaultLifecycleResults.getContent())
+            .extracting(Supplier::getCode)
+            .contains("SUP-A-" + suffix)
+            .doesNotContain("SUP-I-" + suffix);
         assertThat(supplierRepository.existsByCode("SUP-A-" + suffix)).isTrue();
         assertThat(supplierRepository.findByCode("SUP-A-" + suffix)).contains(activeSupplier);
         assertThat(applicationContext.getBean(com.bloom.app.persistence.repository.GoodsReceiptRepository.class)

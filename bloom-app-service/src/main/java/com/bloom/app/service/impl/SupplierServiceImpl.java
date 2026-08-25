@@ -12,16 +12,13 @@ import com.bloom.app.persistence.repository.SupplierRepository;
 import com.bloom.app.service.SupplierService;
 import com.bloom.app.service.mapper.SupplierMapper;
 import com.bloom.app.service.specification.SupplierSpecification;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-
-import java.util.List;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
@@ -55,17 +52,14 @@ public class SupplierServiceImpl implements SupplierService {
     }
 
     @Override
-    @Transactional
+    @Transactional(readOnly = true)
     public Page<SupplierResponse> filterSuppliers(FilterSupplierRequest request, Pageable pageable) {
-        Page<Supplier> supplierPage = supplierRepository.findAll(SupplierSpecification.filter(request), pageable);
-        List<SupplierResponse> responses = supplierPage.getContent().stream()
-            .map(supplierMapper::entityToResponse)
-            .toList();
-        return new PageImpl<>(responses, pageable, supplierPage.getTotalElements());
+        return supplierRepository.findAll(SupplierSpecification.filter(request), pageable)
+            .map(supplierMapper::entityToResponse);
     }
 
     @Override
-    @Transactional
+    @Transactional(readOnly = true)
     public SupplierResponse getSupplierDetails(String code) {
         return supplierMapper.entityToResponse(findSupplier(code));
     }
