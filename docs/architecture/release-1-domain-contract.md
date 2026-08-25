@@ -165,6 +165,68 @@ An opening quantity is represented by an `IN` movement whose source semantics ar
 11. After the first `StockMovement` exists for an item, both `baseUnitOfMeasure` and `fractionalQuantityAllowed` are immutable. A request that leaves either value unchanged remains valid.
 12. Historical movements are retained. A stock correction is another movement through `StockMovementService`, not an edit to a prior movement or a direct overwrite of an item balance.
 
+### Stock-adjustment API contract
+
+The Release 1 web client posts a stock adjustment with a mandatory, nonblank `reason` and one or more unique item lines. Each line supplies an `itemSku`, `stockLocation` (`STORE` or `WAREHOUSE`), `actionType`, and `changeQuantity` with at most four decimal places. The persisted `reason` is trimmed. The database column is PostgreSQL `TEXT`, so this contract does not invent a DTO length limit.
+
+- `ADD` treats `changeQuantity` as a strictly positive delta and records an `IN` movement.
+- `REMOVE` treats `changeQuantity` as a strictly positive delta and records an `OUT` movement. It is rejected when the selected location would become negative.
+- `CORRECTION` treats `changeQuantity` as the non-negative absolute target balance. The backend derives an `IN` or `OUT` movement and its positive magnitude from the authoritative before balance. A target equal to the current balance is rejected as a no-op so every successful adjustment line has a persisted movement.
+
+All three actions enforce the authoritative item's `fractionalQuantityAllowed` policy. A stock adjustment, its lines, selected-location balance mutations, and stock movements are one transaction. An optimistic stock conflict returns HTTP 409; any rejected line or persistence failure rolls the entire posting back.
+
+Only `POST /api/stock-adjustments` returns the posting result wrapper. List and detail endpoints continue to return `StockAdjustmentResponse`. Every adjustment line in create, list, and detail responses includes its authoritative `stockLocation`.
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "code": 200,
+  "data": {
+    "adjustment": {
+      "id": 42,
+      "stockAdjustmentCode": "SA-000042",
+      "reason": "Hasil hitung fisik",
+      "createdBy": "admin",
+      "createdAt": "2026-08-25T10:00:00Z",
+      "items": [
+        {
+          "id": 81,
+          "item": {
+            "sku": "KAIN-001",
+            "baseUnitOfMeasure": "METER",
+            "fractionalQuantityAllowed": true
+          },
+          "actionType": "REMOVE",
+          "stockLocation": "WAREHOUSE",
+          "changeQuantity": 0.2500,
+          "previousStock": 5.0000,
+          "newStock": 4.7500
+        }
+      ]
+    },
+    "movements": [
+      {
+        "id": 151,
+        "sourceType": "STOCK_ADJUSTMENT",
+        "sourceId": 42,
+        "movementType": "OUT",
+        "adjustmentActionType": "REMOVE",
+        "location": "WAREHOUSE",
+        "quantity": 0.2500,
+        "qtyBefore": 5.0000,
+        "qtyAfter": 4.7500,
+        "referenceNo": "SA-000042",
+        "createdBy": "admin",
+        "createdAt": "2026-08-25T10:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+The concrete `StockMovementResponse` also retains its existing `item` field. No persisted idempotency key is approved for stock-adjustment POST in Release 1. A client must disable duplicate submission while a request is pending and must not automatically retry after an ambiguous timeout.
+
 ## Supplier receipt, accounts-payable, and payment contract
 
 ### Domain boundary

@@ -10,6 +10,7 @@ import com.bloom.app.api.dto.request.stocktransfer.StockTransferLineRequest;
 import com.bloom.app.api.dto.request.stockmovement.FilterStockMovementRequest;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
+import com.bloom.app.api.dto.response.stockadjustment.CreateStockAdjustmentResponse;
 import com.bloom.app.api.dto.response.stocktransfer.StockTransferResponse;
 import com.bloom.app.api.dto.response.stocktransfer.StockTransferSummaryResponse;
 import com.bloom.app.api.dto.response.stockmovement.StockMovementResponse;
@@ -587,7 +588,8 @@ class PostgreSqlMigrationAndContextTest {
                 .build()))
             .build();
 
-        StockAdjustmentResponse response = stockAdjustmentService.createStockAdjustment(request);
+        CreateStockAdjustmentResponse postingResponse = stockAdjustmentService.createStockAdjustment(request);
+        StockAdjustmentResponse response = postingResponse.getAdjustment();
 
         var adjustment = stockAdjustmentRepository
             .findByStockAdjustmentCode(response.getStockAdjustmentCode()).orElseThrow();
@@ -609,6 +611,84 @@ class PostgreSqlMigrationAndContextTest {
                 assertThat(movement.getAdjustmentActionType())
                     .isEqualTo(StockAdjustmentActionType.CORRECTION);
             });
+        assertThat(postingResponse.getMovements()).singleElement().satisfies(movement -> {
+            assertThat(movement.getId()).isNotNull();
+            assertThat(movement.getSourceType()).isEqualTo(MovementSourceType.STOCK_ADJUSTMENT);
+            assertThat(movement.getSourceId()).isEqualTo(adjustment.getId());
+            assertThat(movement.getReferenceNo()).isEqualTo(response.getStockAdjustmentCode());
+            assertThat(movement.getLocation()).isEqualTo(StockLocation.STORE);
+            assertThat(movement.getQtyBefore()).isEqualByComparingTo("1.0000");
+            assertThat(movement.getQtyAfter()).isEqualByComparingTo("0.2500");
+        });
+    }
+
+    @Test
+    void rollsBackMultiLineAdjustmentWhenMovementPersistenceFails() {
+        Long firstItemId = insertInventoryItem("ADJUSTMENT-ROLLBACK-FIRST", new BigDecimal("5.0000"));
+        Long failingItemId = insertInventoryItem("ADJUSTMENT-ROLLBACK-SECOND", new BigDecimal("3.0000"));
+        Item firstItem = itemRepository.findById(firstItemId).orElseThrow();
+        Item failingItem = itemRepository.findById(failingItemId).orElseThrow();
+        long adjustmentCountBefore = stockAdjustmentRepository.count();
+
+        CreateStockAdjustmentRequest request = CreateStockAdjustmentRequest.builder()
+            .reason("Injected movement failure")
+            .items(List.of(
+                StockAdjustmentItemRequest.builder()
+                    .itemSku(firstItem.getSku())
+                    .changeQuantity(new BigDecimal("1.0000"))
+                    .actionType(StockAdjustmentActionType.REMOVE)
+                    .stockLocation(StockLocation.STORE)
+                    .build(),
+                StockAdjustmentItemRequest.builder()
+                    .itemSku(failingItem.getSku())
+                    .changeQuantity(new BigDecimal("1.0000"))
+                    .actionType(StockAdjustmentActionType.REMOVE)
+                    .stockLocation(StockLocation.STORE)
+                    .build()))
+            .build();
+
+        jdbcTemplate.execute("""
+            CREATE OR REPLACE FUNCTION fail_stock_adjustment_movement()
+            RETURNS trigger AS $$
+            BEGIN
+                IF NEW.source_type = 'STOCK_ADJUSTMENT'
+                   AND NEW.product_id = %d THEN
+                    RAISE EXCEPTION 'injected stock adjustment movement failure';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """.formatted(failingItemId));
+        jdbcTemplate.execute("""
+            CREATE TRIGGER trg_fail_stock_adjustment_movement
+            BEFORE INSERT ON stock_movements
+            FOR EACH ROW EXECUTE FUNCTION fail_stock_adjustment_movement()
+            """);
+
+        try {
+            assertThatThrownBy(() -> stockAdjustmentService.createStockAdjustment(request))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("injected stock adjustment movement failure");
+        } finally {
+            jdbcTemplate.execute(
+                "DROP TRIGGER IF EXISTS trg_fail_stock_adjustment_movement ON stock_movements");
+            jdbcTemplate.execute("DROP FUNCTION IF EXISTS fail_stock_adjustment_movement()");
+        }
+
+        assertThat(stockAdjustmentRepository.count()).isEqualTo(adjustmentCountBefore);
+        assertThat(itemRepository.findById(firstItemId).orElseThrow().getStockStore())
+            .isEqualByComparingTo("5.0000");
+        assertThat(itemRepository.findById(failingItemId).orElseThrow().getStockStore())
+            .isEqualByComparingTo("3.0000");
+        assertThat(jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*) FROM stock_movements
+            WHERE source_type = 'STOCK_ADJUSTMENT' AND product_id IN (?, ?)
+            """,
+            Long.class,
+            firstItemId,
+            failingItemId
+        )).isZero();
     }
 
     @Test
