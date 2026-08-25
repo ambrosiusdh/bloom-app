@@ -19,8 +19,13 @@ import com.bloom.app.service.util.CurrentActorProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -161,6 +166,48 @@ class ExpenseServiceImplTest {
                 .build()))
             .isInstanceOf(ExpenseIdempotencyConflictException.class);
         verify(cashMovementService, times(1)).recordMovement(any());
+    }
+
+    @Test
+    void readsExpenseWithExplicitCashSessionFetch() {
+        Expense expense = Expense.builder()
+            .id(41L)
+            .cashSession(openSession())
+            .amount(BigDecimal.ONE)
+            .category(ExpenseCategory.CHARITY)
+            .build();
+        ExpenseResponse expected = ExpenseResponse.builder()
+            .id(41L)
+            .cashSessionId(7L)
+            .build();
+        when(expenseRepository.findDetailsById(41L)).thenReturn(Optional.of(expense));
+        when(expenseMapper.toResponse(expense)).thenReturn(expected);
+
+        assertThat(service.getExpense(41L)).isSameAs(expected);
+        verify(expenseRepository).findDetailsById(41L);
+    }
+
+    @Test
+    void listsAllSessionsUsingExplicitCashSessionFetchAndAuditSort() {
+        Expense expense = Expense.builder()
+            .id(41L)
+            .cashSession(openSession())
+            .amount(BigDecimal.ONE)
+            .category(ExpenseCategory.CHARITY)
+            .build();
+        ExpenseResponse expected = ExpenseResponse.builder().id(41L).build();
+        Pageable requested = PageRequest.of(2, 10, Sort.by("amount"));
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        when(expenseRepository.findAllWithCashSession(any()))
+            .thenReturn(new PageImpl<>(List.of(expense)));
+        when(expenseMapper.toResponse(expense)).thenReturn(expected);
+
+        assertThat(service.getExpenses(requested).getContent()).containsExactly(expected);
+        verify(expenseRepository).findAllWithCashSession(pageableCaptor.capture());
+        assertThat(pageableCaptor.getValue().getPageNumber()).isEqualTo(2);
+        assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(10);
+        assertThat(pageableCaptor.getValue().getSort())
+            .isEqualTo(Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
     }
 
     @Test

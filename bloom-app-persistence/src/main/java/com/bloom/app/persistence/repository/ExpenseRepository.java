@@ -24,13 +24,16 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long> {
     @EntityGraph(attributePaths = "cashSession")
     Optional<Expense> findByCreateIdempotencyKey(String createIdempotencyKey);
 
-    @Override
     @EntityGraph(attributePaths = "cashSession")
-    Optional<Expense> findById(Long id);
+    @Query("SELECT expense FROM Expense expense WHERE expense.id = :id")
+    Optional<Expense> findDetailsById(@Param("id") Long id);
 
-    @Override
     @EntityGraph(attributePaths = "cashSession")
-    Page<Expense> findAll(Pageable pageable);
+    @Query(
+        value = "SELECT expense FROM Expense expense",
+        countQuery = "SELECT COUNT(expense) FROM Expense expense"
+    )
+    Page<Expense> findAllWithCashSession(Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT expense FROM Expense expense JOIN FETCH expense.cashSession WHERE expense.id = :id")

@@ -100,7 +100,7 @@ public class ExpenseServiceImpl implements ExpenseService {
     @Transactional(readOnly = true)
     public ExpenseResponse getExpense(Long expenseId) {
         validateExpenseId(expenseId);
-        Expense expense = expenseRepository.findById(expenseId)
+        Expense expense = expenseRepository.findDetailsById(expenseId)
             .orElseThrow(() -> new ResourceNotFoundException("Expense not found: " + expenseId));
         return expenseMapper.toResponse(expense);
     }
@@ -113,7 +113,8 @@ public class ExpenseServiceImpl implements ExpenseService {
             pageable.getPageSize(),
             Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))
         );
-        return expenseRepository.findAll(effectivePageable).map(expenseMapper::toResponse);
+        return expenseRepository.findAllWithCashSession(effectivePageable)
+            .map(expenseMapper::toResponse);
     }
 
     @Override
