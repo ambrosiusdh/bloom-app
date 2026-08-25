@@ -8,6 +8,7 @@ import com.bloom.app.api.dto.request.stocktransfer.CreateStockTransferRequest;
 import com.bloom.app.api.dto.request.stocktransfer.FilterStockTransferRequest;
 import com.bloom.app.api.dto.request.stocktransfer.StockTransferLineRequest;
 import com.bloom.app.api.dto.request.stockmovement.FilterStockMovementRequest;
+import com.bloom.app.api.dto.request.supplier.FilterSupplierRequest;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
 import com.bloom.app.api.dto.response.stockadjustment.CreateStockAdjustmentResponse;
@@ -28,6 +29,7 @@ import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.SaleItem;
 import com.bloom.app.domain.model.StockTransfer;
+import com.bloom.app.domain.model.Supplier;
 import com.bloom.app.domain.model.UnitOfMeasure;
 import com.bloom.app.persistence.repository.DocumentCounterRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
@@ -36,11 +38,13 @@ import com.bloom.app.persistence.repository.SaleRepository;
 import com.bloom.app.persistence.repository.StockAdjustmentRepository;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import com.bloom.app.persistence.repository.StockTransferRepository;
+import com.bloom.app.persistence.repository.SupplierRepository;
 import com.bloom.app.service.SaleService;
 import com.bloom.app.service.StockAdjustmentService;
 import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.StockMovementQueryService;
 import com.bloom.app.service.StockTransferService;
+import com.bloom.app.service.specification.SupplierSpecification;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -134,6 +138,9 @@ class PostgreSqlMigrationAndContextTest {
     @Autowired
     private StockTransferService stockTransferService;
 
+    @Autowired
+    private SupplierRepository supplierRepository;
+
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
         if (POSTGRES != null) {
@@ -163,7 +170,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndBackfillsBaselineStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("15");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("16");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_quantity, stock_store, stock_warehouse,
@@ -190,6 +197,7 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(columnIsNullable("stock_movements", "reference_no")).isFalse();
         assertThat(columnExists("items", "stock_quantity")).isTrue();
         assertThat(tableExists("suppliers")).isTrue();
+        assertThat(columnExists("suppliers", "active")).isTrue();
         assertThat(tableExists("cash_sessions")).isTrue();
         assertThat(tableExists("cash_movements")).isTrue();
         assertThat(tableExists("expenses")).isTrue();
@@ -287,6 +295,67 @@ class PostgreSqlMigrationAndContextTest {
                       CURRENT_TIMESTAMP, 'STORE', 0.0000, 2.0000)
             """))
             .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @Transactional
+    void supplierRepositoryFiltersLifecycleStateAndDetectsFinancialHistory() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        Supplier activeSupplier = supplierRepository.saveAndFlush(Supplier.builder()
+            .code("SUP-A-" + suffix)
+            .name("Bloom Textile " + suffix)
+            .contactNumber("021-555")
+            .address("Jakarta")
+            .active(true)
+            .build());
+        supplierRepository.saveAndFlush(Supplier.builder()
+            .code("SUP-I-" + suffix)
+            .name("Inactive Textile " + suffix)
+            .active(false)
+            .build());
+
+        Page<Supplier> activeResults = supplierRepository.findAll(
+            SupplierSpecification.filter(FilterSupplierRequest.builder()
+                .query("bloom textile " + suffix.toLowerCase())
+                .build()),
+            PageRequest.of(0, 10)
+        );
+        Page<Supplier> inactiveResults = supplierRepository.findAll(
+            SupplierSpecification.filter(FilterSupplierRequest.builder()
+                .code("SUP-I-" + suffix)
+                .active(false)
+                .build()),
+            PageRequest.of(0, 10)
+        );
+        Page<Supplier> defaultLifecycleResults = supplierRepository.findAll(
+            SupplierSpecification.filter(FilterSupplierRequest.builder().build()),
+            PageRequest.of(0, 100)
+        );
+
+        assertThat(activeResults.getContent())
+            .extracting(Supplier::getCode)
+            .containsExactly("SUP-A-" + suffix);
+        assertThat(inactiveResults.getContent())
+            .extracting(Supplier::getCode)
+            .containsExactly("SUP-I-" + suffix);
+        assertThat(defaultLifecycleResults.getContent())
+            .extracting(Supplier::getCode)
+            .contains("SUP-A-" + suffix)
+            .doesNotContain("SUP-I-" + suffix);
+        assertThat(supplierRepository.existsByCode("SUP-A-" + suffix)).isTrue();
+        assertThat(supplierRepository.findByCode("SUP-A-" + suffix)).contains(activeSupplier);
+        assertThat(applicationContext.getBean(com.bloom.app.persistence.repository.GoodsReceiptRepository.class)
+            .existsBySupplierId(activeSupplier.getId())).isFalse();
+
+        jdbcTemplate.update("""
+            INSERT INTO goods_receipts (
+                code, received_date, supplier_name, description, created_at, created_by,
+                supplier_id, total_amount, paid_amount
+            ) VALUES (?, CURRENT_TIMESTAMP, ?, NULL, CURRENT_TIMESTAMP, 'test', ?, 10.0000, 0.0000)
+            """, "GR-" + suffix, activeSupplier.getName(), activeSupplier.getId());
+
+        assertThat(applicationContext.getBean(com.bloom.app.persistence.repository.GoodsReceiptRepository.class)
+            .existsBySupplierId(activeSupplier.getId())).isTrue();
     }
 
     @Test

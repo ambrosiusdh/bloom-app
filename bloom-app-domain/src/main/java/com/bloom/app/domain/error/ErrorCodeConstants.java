@@ -4,6 +4,14 @@ public class ErrorCodeConstants {
     public static final String GOODS_RECEIPT_NOT_FOUND_CODE = "goods_receipt_not_found";
     public static final String GOODS_RECEIPT_NOT_FOUND_MESSAGE = "Goods receipt not found for: %s";
 
+    public static final String SUPPLIER_NOT_FOUND_CODE = "supplier_not_found";
+    public static final String SUPPLIER_NOT_FOUND_MESSAGE = "Supplier not found for code: %s";
+    public static final String SUPPLIER_CODE_ALREADY_EXISTS_CODE = "supplier_code_already_exists";
+    public static final String SUPPLIER_CODE_ALREADY_EXISTS_MESSAGE = "Supplier code already exists: %s";
+    public static final String SUPPLIER_HAS_FINANCIAL_HISTORY_CODE = "supplier_has_financial_history";
+    public static final String SUPPLIER_HAS_FINANCIAL_HISTORY_MESSAGE =
+        "Supplier %s cannot be deleted because financial history exists";
+
     public static final String ITEM_NOT_FOUND_CODE = "item_not_found";
     public static final String ITEM_NOT_FOUND_MESSAGE = "Item not found for: %s";
     public static final String ITEM_QUANTITY_MUST_BE_POSITIVE_CODE = "item_quantity_must_be_positive";

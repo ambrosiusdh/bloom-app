@@ -13,6 +13,8 @@ public interface GoodsReceiptRepository extends JpaRepository<GoodsReceipt, Long
         org.springframework.data.jpa.repository.JpaSpecificationExecutor<GoodsReceipt> {
     Optional<GoodsReceipt> findByCode(String code);
 
+    boolean existsBySupplierId(Long supplierId);
+
     @Query("SELECT COUNT(g) FROM GoodsReceipt g WHERE g.createdAt BETWEEN :start AND :end")
     long countByCreatedAtBetween(Instant start, Instant end);
 }
