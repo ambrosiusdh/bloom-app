@@ -19,6 +19,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
@@ -46,6 +47,16 @@ public class GlobalExceptionHandler {
         body.put("errorType", "ValidationFailed");
         body.put("message", errors);
 
+        return ResponseEntity.badRequest().body(body);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<?> handleUnreadableRequest(HttpMessageNotReadableException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", false);
+        body.put("message", "Malformed JSON request or unsupported enum value");
+        body.put("code", HttpStatus.BAD_REQUEST.value());
+        body.put("errorType", ex.getClass().getSimpleName());
         return ResponseEntity.badRequest().body(body);
     }
 

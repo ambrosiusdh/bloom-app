@@ -8,5 +8,6 @@ import org.mapstruct.Mapping;
 @Mapper(componentModel = "spring", uses = { ItemMapper.class })
 public interface StockAdjustmentItemMapper {
     @Mapping(target = "item", source = "item")
+    @Mapping(target = "stockLocation", source = "stockLocation")
     StockAdjustmentItemResponse toResponse(StockAdjustmentItem stockAdjustmentItem);
 }

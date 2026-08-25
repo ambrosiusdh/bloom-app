@@ -6,10 +6,12 @@ import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.StockAdjustment;
+import com.bloom.app.domain.model.StockMovement;
 import com.bloom.app.domain.model.UnitOfMeasure;
 
 import java.math.BigDecimal;
 import java.util.Collection;
+import java.util.List;
 import java.util.Set;
 
 public interface StockMovementService {
@@ -23,7 +25,7 @@ public interface StockMovementService {
         StockLocation stockLocation
     );
     void recordSaleMovements(Sale sale);
-    void recordManualAdjustment(StockAdjustment adjustment);
+    List<StockMovement> recordManualAdjustment(StockAdjustment adjustment);
     boolean validateMeasurementRuleChanges(
         Item item,
         UnitOfMeasure requestedUnitOfMeasure,
