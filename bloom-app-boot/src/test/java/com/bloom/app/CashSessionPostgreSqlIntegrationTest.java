@@ -2,26 +2,33 @@ package com.bloom.app;
 
 import com.bloom.app.api.dto.request.cashsession.CloseCashSessionRequest;
 import com.bloom.app.api.dto.request.cashsession.OpenCashSessionRequest;
+import com.bloom.app.api.dto.request.expense.CreateExpenseRequest;
+import com.bloom.app.api.dto.request.expense.VoidExpenseRequest;
 import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
 import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
 import com.bloom.app.api.dto.response.cashsession.CashMovementResponse;
 import com.bloom.app.api.dto.response.cashsession.CashSessionResponse;
+import com.bloom.app.api.dto.response.expense.ExpenseResponse;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.domain.enums.CashMovementType;
 import com.bloom.app.domain.enums.CashSessionStatus;
+import com.bloom.app.domain.enums.ExpenseCategory;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.PaymentType;
 import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.CashMovementIdempotencyConflictException;
 import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.CheckoutIdempotencyConflictException;
+import com.bloom.app.domain.exception.ExpenseIdempotencyConflictException;
 import com.bloom.app.persistence.repository.CashMovementRepository;
 import com.bloom.app.persistence.repository.CashSessionRepository;
+import com.bloom.app.persistence.repository.ExpenseRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.SaleRepository;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import com.bloom.app.service.CashMovementService;
 import com.bloom.app.service.CashSessionService;
+import com.bloom.app.service.ExpenseService;
 import com.bloom.app.service.SaleService;
 import com.bloom.app.service.command.RecordCashMovementCommand;
 import org.junit.jupiter.api.AfterAll;
@@ -71,6 +78,12 @@ class CashSessionPostgreSqlIntegrationTest {
 
     @Autowired
     private CashMovementRepository cashMovementRepository;
+
+    @Autowired
+    private ExpenseService expenseService;
+
+    @Autowired
+    private ExpenseRepository expenseRepository;
 
     @Autowired
     private SaleService saleService;
@@ -417,6 +430,133 @@ class CashSessionPostgreSqlIntegrationTest {
             .isEqualByComparingTo("110.0000");
     }
 
+    @Test
+    void expensePostingAndConcurrentVoidProduceOneOutAndOneReversal() throws Exception {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        String createKey = "owner-expense-" + UUID.randomUUID();
+        ExpenseResponse created = expenseService.createExpense(createKey, expenseRequest(
+            "25.0000", ExpenseCategory.OWNER_WITHDRAWAL, "Owner draw"));
+        ExpenseResponse retried = expenseService.createExpense(createKey, expenseRequest(
+            "25.0", ExpenseCategory.OWNER_WITHDRAWAL, " Owner draw "));
+
+        assertThat(retried.getId()).isEqualTo(created.getId());
+        assertThat(created.getCashSessionId()).isEqualTo(sessionId);
+        assertThat(created.isOperationalExpense()).isFalse();
+        assertThat(created.isVoided()).isFalse();
+        assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
+            .isEqualByComparingTo("75.0000");
+        assertThat(movementCount(created.getId(), "EXPENSE")).isEqualTo(1L);
+        assertThat(movementCount(created.getId(), "EXPENSE_REVERSAL")).isZero();
+        assertThatThrownBy(() -> expenseService.createExpense(createKey, expenseRequest(
+            "26.0000", ExpenseCategory.OWNER_WITHDRAWAL, "Owner draw")))
+            .isInstanceOf(ExpenseIdempotencyConflictException.class);
+        SecurityContextHolder.clearContext();
+
+        List<Object> outcomes = race(
+            () -> expenseService.voidExpense(created.getId(), voidRequest("Wrong drawer")),
+            () -> expenseService.voidExpense(created.getId(), voidRequest("Retry"))
+        );
+
+        assertThat(outcomes).allMatch(ExpenseResponse.class::isInstance);
+        ExpenseResponse voided = expenseService.getExpense(created.getId());
+        assertThat(voided.isVoided()).isTrue();
+        assertThat(voided.getVoidedReason()).isIn("Wrong drawer", "Retry");
+        assertThat(voided.getVoidedAt()).isNotNull();
+        assertThat(voided.getVoidedBy()).isEqualTo("admin");
+        assertThat(movementCount(created.getId(), "EXPENSE")).isEqualTo(1L);
+        assertThat(movementCount(created.getId(), "EXPENSE_REVERSAL")).isEqualTo(1L);
+        assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
+            .isEqualByComparingTo("100.0000");
+    }
+
+    @Test
+    void concurrentExpenseCreateRetryWritesOneExpenseAndOneCashOut() throws Exception {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        String createKey = "concurrent-expense-" + UUID.randomUUID();
+        CreateExpenseRequest request = expenseRequest(
+            "10.0000", ExpenseCategory.STORE_OPERATIONAL, "Cleaning supplies");
+        SecurityContextHolder.clearContext();
+
+        List<Object> outcomes = race(
+            () -> expenseService.createExpense(createKey, request),
+            () -> expenseService.createExpense(createKey, request)
+        );
+
+        assertThat(outcomes).allMatch(ExpenseResponse.class::isInstance);
+        assertThat(outcomes).extracting(outcome -> ((ExpenseResponse) outcome).getId())
+            .containsOnly(((ExpenseResponse) outcomes.getFirst()).getId());
+        var expense = expenseRepository.findByCreateIdempotencyKey(createKey).orElseThrow();
+        assertThat(movementCount(expense.getId(), "EXPENSE")).isEqualTo(1L);
+        assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
+            .isEqualByComparingTo("90.0000");
+    }
+
+    @Test
+    void closedSessionRejectsExpenseVoidAndDatabaseRejectsEditOrDelete() {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        ExpenseResponse created = expenseService.createExpense(
+            "other-expense-" + UUID.randomUUID(), expenseRequest(
+            "10.0000", ExpenseCategory.OTHER, "Emergency courier"));
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+            "UPDATE expenses SET amount = 11.0000 WHERE id = ?", created.getId()))
+            .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> jdbcTemplate.update(
+            "DELETE FROM expenses WHERE id = ?", created.getId()))
+            .isInstanceOf(DataAccessException.class);
+
+        cashSessionService.closeSession(sessionId, closeRequest("90.0000"));
+        assertThatThrownBy(() -> expenseService.voidExpense(
+            created.getId(), voidRequest("Discovered after close")))
+            .isInstanceOf(CashSessionConflictException.class)
+            .hasMessageContaining("closed");
+        assertThat(movementCount(created.getId(), "EXPENSE_REVERSAL")).isZero();
+        assertThat(expenseRepository.findById(created.getId()).orElseThrow().isVoided()).isFalse();
+    }
+
+    @Test
+    void expenseValidationAndLedgerFailureLeaveNoPartialExpense() {
+        assertThatThrownBy(() -> expenseService.createExpense(
+            "no-session-" + UUID.randomUUID(), expenseRequest(
+            "1.0000", ExpenseCategory.CHARITY, null)))
+            .isInstanceOf(CashSessionConflictException.class);
+
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        assertThatThrownBy(() -> expenseService.createExpense(
+            "zero-expense-" + UUID.randomUUID(), expenseRequest(
+            "0.0000", ExpenseCategory.CHARITY, null)))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("positive");
+        assertThatThrownBy(() -> expenseService.createExpense(
+            "blank-other-" + UUID.randomUUID(), expenseRequest(
+            "1.0000", ExpenseCategory.OTHER, "  ")))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("required for OTHER");
+
+        Long consumedId = jdbcTemplate.queryForObject(
+            "SELECT nextval('expenses_id_seq')", Long.class);
+        long conflictingExpenseId = consumedId + 1;
+        jdbcTemplate.update("""
+            INSERT INTO cash_movements (
+                cash_session_id, movement_type, source_type, source_id, reference_no,
+                amount, direction, recorded_at, actor, idempotency_key
+            ) VALUES (?, 'EXPENSE', 'EXPENSE', ?, 'CONFLICTING-EXPENSE',
+                99.0000, 'OUT', CURRENT_TIMESTAMP, 'admin', ?)
+            """, sessionId, conflictingExpenseId, "EXPENSE:" + conflictingExpenseId);
+
+        long expenseCountBefore = expenseRepository.count();
+        assertThatThrownBy(() -> expenseService.createExpense(
+            "ledger-conflict-" + UUID.randomUUID(), expenseRequest(
+            "5.0000", ExpenseCategory.STORE_OPERATIONAL, "Cleaning supplies")))
+            .isInstanceOf(CashMovementIdempotencyConflictException.class);
+        assertThat(expenseRepository.count()).isEqualTo(expenseCountBefore);
+        assertThat(expenseRepository.findById(conflictingExpenseId)).isEmpty();
+    }
+
     private List<Object> race(Supplier<?> first, Supplier<?> second) throws Exception {
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
@@ -470,6 +610,27 @@ class CashSessionPostgreSqlIntegrationTest {
             String amount) {
         return new RecordCashMovementCommand(
             sessionId, type, sourceId, reference, new BigDecimal(amount));
+    }
+
+    private CreateExpenseRequest expenseRequest(
+            String amount, ExpenseCategory category, String description) {
+        return CreateExpenseRequest.builder()
+            .amount(new BigDecimal(amount))
+            .category(category)
+            .description(description)
+            .build();
+    }
+
+    private VoidExpenseRequest voidRequest(String reason) {
+        return VoidExpenseRequest.builder().reason(reason).build();
+    }
+
+    private long movementCount(Long expenseId, String movementType) {
+        return jdbcTemplate.queryForObject("""
+            SELECT COUNT(*)
+            FROM cash_movements
+            WHERE source_type = 'EXPENSE' AND source_id = ? AND movement_type = ?
+            """, Long.class, expenseId, movementType);
     }
 
     private ItemFixture insertCheckoutItem(String purpose, String price, String storeStock) {

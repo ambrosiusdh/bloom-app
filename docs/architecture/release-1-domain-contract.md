@@ -305,22 +305,26 @@ This contract does not add `BANK_TRANSFER` as a sale payment method. The current
 An `Expense` in Release 1 is an unexpected outflow of store drawer cash.
 
 - It requires and belongs to the currently open `CashSession`.
+- Creation requires an `Idempotency-Key`; retrying the same canonical request returns the original expense, while reusing the key for a changed request is rejected.
 - Recording it decreases expected drawer cash by its amount.
 - It must be rejected if no session is open or the target session is closed.
 - A mistake is retained and voided/reversed, never hard-deleted.
 - The existing `Expense.isVoided` and `voidedReason` vocabulary is the canonical minimum: a void requires a reason, leaves the original record present, and makes its net drawer effect zero.
 
-Whether an expense from an already closed session may be voided later, and how that correction is reflected without mutating a closed session, remains unresolved.
+An expense from a closed session cannot be voided in Release 1 because the compensating movement would mutate reconciled drawer history. A post-close correction workflow remains outside Release 1.
 
 ### Allowed expense categories
 
-Release 1 allows exactly the values already present in `ExpenseCategory`:
+Release 1 allows exactly these `ExpenseCategory` values:
 
 | Value | Release 1 meaning |
 |---|---|
 | `STORE_OPERATIONAL` | Unexpected store-operational spending paid from the drawer. |
-| `HOUSEHOLD` | Household spending paid from the store drawer, using the repository's existing business term. |
-| `EMERGENCY_BUY` | An unplanned urgent purchase paid from the drawer. |
+| `FOOD_AND_DRINK` | Food or drink paid from the drawer. |
+| `CHARITY` | A charitable outflow paid from the drawer. |
+| `EMERGENCY_PURCHASE` | An unplanned urgent purchase paid from the drawer. |
+| `OWNER_WITHDRAWAL` | An owner draw retained separately from ordinary operational-expense reporting. |
+| `OTHER` | Another unexpected drawer outflow; a nonblank description is mandatory. |
 
 Adding a category is a domain and reporting change; it is not free-form input.
 
@@ -424,6 +428,6 @@ The approved contract is sufficient for planning, but these decisions are requir
 2. The precise meaning of `Sale.paidAmount` (for example, sale value versus cash tender) and whether a separate change-due value is needed.
 3. Supplier-payment allocation across receipts, overpayment handling, and the supplier-payment void/reversal policy.
 4. Goods-receipt cancellation/return and sale void/refund lifecycles.
-5. Whether and how an expense mistake discovered after cash-session close is reversed without changing a closed session.
+5. A future post-close expense-correction workflow that does not mutate a reconciled session.
 6. Cash-session reopen policy and authorization, if reopening is to exist at all.
 7. The React web client API contract, because that client is not present in this repository.
