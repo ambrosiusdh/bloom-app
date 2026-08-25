@@ -83,6 +83,21 @@ public class CashSessionServiceImpl implements CashSessionService {
 
     @Override
     @Transactional(readOnly = true)
+    public Page<CashSessionResponse> getSessionHistory(
+            CashSessionStatus status, Pageable pageable) {
+        Pageable effectivePageable = PageRequest.of(
+            pageable.getPageNumber(),
+            pageable.getPageSize(),
+            Sort.by(Sort.Order.desc("openedAt"), Sort.Order.desc("id"))
+        );
+        Page<CashSession> sessions = status == null
+            ? cashSessionRepository.findAllHistory(effectivePageable)
+            : cashSessionRepository.findAllHistoryByStatus(status, effectivePageable);
+        return sessions.map(cashSessionMapper::toResponse);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public CashSessionResponse getSessionDetails(Long sessionId) {
         return cashSessionMapper.toResponse(findSession(sessionId));
     }

@@ -8,8 +8,11 @@ import com.bloom.app.api.dto.response.cashsession.CashMovementResponse;
 import com.bloom.app.api.dto.response.cashsession.CashSessionResponse;
 import com.bloom.app.api.helper.PagingHelper;
 import com.bloom.app.api.helper.ResponseHelper;
+import com.bloom.app.domain.enums.CashSessionStatus;
 import com.bloom.app.service.CashSessionService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +25,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @Validated
@@ -54,6 +58,24 @@ public class CashSessionController {
             .orElseGet(() -> ResponseHelper.ok(NO_OPEN_SESSION_MESSAGE, null));
     }
 
+    @GetMapping
+    @Operation(
+        summary = "List cash session history",
+        description = "Returns a one-based paginated history ordered by openedAt DESC, id DESC. "
+            + "Client-supplied sort values are ignored."
+    )
+    public ResponseEntity<ApiResponse<Page<CashSessionResponse>>> getSessionHistory(
+            @RequestParam(required = false)
+            @Parameter(
+                description = "Optional exact status filter",
+                schema = @Schema(allowableValues = {"OPEN", "CLOSED"})
+            )
+            String status,
+            Pageable pageable) {
+        return ResponseHelper.ok(cashSessionService.getSessionHistory(
+            parseStatus(status), PagingHelper.toPageRequest(pageable)));
+    }
+
     @GetMapping("/{sessionId}")
     @Operation(summary = "Get cash session details")
     public ResponseEntity<ApiResponse<CashSessionResponse>> getSessionDetails(
@@ -83,5 +105,17 @@ public class CashSessionController {
             @PathVariable @Positive Long sessionId,
             @Valid @RequestBody CloseCashSessionRequest request) {
         return ResponseHelper.ok(cashSessionService.closeSession(sessionId, request));
+    }
+
+    private CashSessionStatus parseStatus(String status) {
+        if (status == null) {
+            return null;
+        }
+        try {
+            return CashSessionStatus.valueOf(status);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(
+                "status must be one of: OPEN, CLOSED", exception);
+        }
     }
 }

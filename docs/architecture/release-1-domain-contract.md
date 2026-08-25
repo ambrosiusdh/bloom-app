@@ -297,6 +297,79 @@ exists. When none exists, it still returns HTTP 200 with `success: true`, `data:
 message `No cash session is currently open`; this normal state is not a resource-not-found error.
 An unknown ID requested through `GET /api/cash-sessions/{sessionId}` remains HTTP 404.
 
+#### Cash-session history read API (FE-17 backend gate)
+
+`GET /api/cash-sessions` returns the read-only session history as
+`ApiResponse<Page<CashSessionResponse>>`. It reads persisted cash-session snapshots directly; it
+does not assemble history from the cash-movement ledger and it does not recalculate reconciliation
+amounts while reading.
+
+The supported query parameters are:
+
+| Parameter | Required | Contract |
+|---|---:|---|
+| `page` | No | One-based requested page. The first page is the default; omitted values and values less than or equal to `1` normalize to the first page under the existing `PagingHelper` convention. |
+| `size` | No | Requested page size. The existing Spring paging policy defaults missing or non-positive values to `20` and caps values above `2000` at `2000`. |
+| `status` | No | Exact, case-sensitive `CashSessionStatus`: `OPEN` or `CLOSED`. Omission means all statuses. Any other value returns the normal HTTP 400 error response. |
+
+Client-selected sorting is not supported for this endpoint. Results always use
+`openedAt DESC, id DESC`; the descending ID tie-breaker makes paging deterministic when two
+sessions have the same opening timestamp. Filtering is applied before paging. An empty match is a
+successful HTTP 200 response with an empty page.
+
+The `ApiResponse.data` value uses the existing serialized Spring `Page` shape. In particular,
+`number` and `pageable.pageNumber` are zero-based response indices even though the request `page`
+parameter is one-based:
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "code": 200,
+  "data": {
+    "content": [],
+    "pageable": {
+      "pageNumber": 0,
+      "pageSize": 20,
+      "sort": { "empty": false, "sorted": true, "unsorted": false },
+      "offset": 0,
+      "paged": true,
+      "unpaged": false
+    },
+    "last": true,
+    "totalPages": 0,
+    "totalElements": 0,
+    "first": true,
+    "size": 20,
+    "number": 0,
+    "sort": { "empty": false, "sorted": true, "unsorted": false },
+    "numberOfElements": 0,
+    "empty": true
+  }
+}
+```
+
+Every history item directly exposes the same authoritative reconciliation and audit fields as
+`GET /api/cash-sessions/{sessionId}`:
+
+| Field | Type and nullability | Meaning |
+|---|---|---|
+| `id` | integer, non-null | Stable cash-session identifier. |
+| `openingCash` | decimal number, non-null | Recorded drawer cash at opening. It is emitted as a JSON number backed by `BigDecimal`, never as binary floating point or a formatted string. |
+| `expectedClosingCash` | decimal number, non-null | Backend-maintained/persisted expected drawer cash. For a closed session this is the final reconciliation snapshot. |
+| `actualClosingCash` | decimal number, nullable | Actual cash counted at close; `null` while the session is open. |
+| `difference` | decimal number, nullable | Persisted variance: `actualClosingCash - expectedClosingCash`; `null` while the session is open. |
+| `status` | `OPEN` or `CLOSED`, non-null | Current session lifecycle status. |
+| `openedAt` | UTC instant, non-null | Backend-recorded opening timestamp. |
+| `openedBy` | string, non-null | Username of the opening actor. |
+| `closedAt` | UTC instant, nullable | Backend-recorded closing timestamp; `null` while open. |
+| `closedBy` | string, nullable | Username of the closing actor; `null` while open. |
+
+The reused `CashSessionResponse` also retains its existing `version` field. List and detail load
+opening and closing actors with their session query, so actor mapping does not issue one query per
+history row. Open sessions must not fabricate `actualClosingCash`, `difference`, `closedAt`, or
+`closedBy`.
+
 ### Sales
 
 Every cashier sale belongs to the open `CashSession`. A sale must be rejected when there is no open session, including a `QRIS` sale.
