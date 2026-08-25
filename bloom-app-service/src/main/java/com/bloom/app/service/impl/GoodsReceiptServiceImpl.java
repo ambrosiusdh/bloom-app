@@ -110,15 +110,17 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             throw new ResourceNotFoundException("Item not found: " + missingSku);
         }
 
-        GoodsReceipt receipt = goodsReceiptMapper.createRequestToEntity(request);
-        receipt.setDescription(normalizeOptional(request.getDescription()));
-        receipt.setCode(documentCounterService.generateNextCode(DocumentType.GOODS_RECEIPT));
-        receipt.setSupplier(supplier);
-        receipt.setSupplierNameSnapshot(supplier.getName());
-        receipt.setCreateIdempotencyKey(normalizedKey);
-        receipt.setCreateRequestHash(requestHash);
-        receipt.setPaidAmount(BigDecimal.ZERO.setScale(CashMoneyUtil.SCALE));
-        receipt.setStatus(GoodsReceiptStatus.POSTED);
+        GoodsReceipt receipt = GoodsReceipt.builder()
+            .code(documentCounterService.generateNextCode(DocumentType.GOODS_RECEIPT))
+            .receivedDate(request.getReceivedDate())
+            .supplier(supplier)
+            .supplierNameSnapshot(supplier.getName())
+            .createIdempotencyKey(normalizedKey)
+            .createRequestHash(requestHash)
+            .paidAmount(BigDecimal.ZERO.setScale(CashMoneyUtil.SCALE))
+            .status(GoodsReceiptStatus.POSTED)
+            .description(normalizeOptional(request.getDescription()))
+            .build();
 
         List<GoodsReceiptItem> lines = new ArrayList<>();
         BigDecimal receiptTotal = BigDecimal.ZERO;
