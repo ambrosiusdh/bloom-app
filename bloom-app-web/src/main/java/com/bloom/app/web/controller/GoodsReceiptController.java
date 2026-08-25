@@ -3,6 +3,7 @@ package com.bloom.app.web.controller;
 import com.bloom.app.api.helper.PagingHelper;
 import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.api.dto.request.goodsreceipt.CreateGoodsReceiptRequest;
+import com.bloom.app.api.dto.request.goodsreceipt.CancelGoodsReceiptRequest;
 import com.bloom.app.api.dto.request.goodsreceipt.FilterGoodsReceiptRequest;
 import com.bloom.app.api.dto.response.ApiResponse;
 import com.bloom.app.api.dto.response.goodsreceipt.GoodsReceiptResponse;
@@ -14,7 +15,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
+@Validated
 @RestController
 @RequestMapping("/api/goods-receipts")
 @RequiredArgsConstructor
@@ -25,10 +30,26 @@ public class GoodsReceiptController {
     @PostMapping
     @Operation(summary = "Create Goods Receipt", description = "Create a new goods receipt.")
     public ResponseEntity<ApiResponse<GoodsReceiptResponse>> createGoodsReceipt(
-        @Validated @RequestBody CreateGoodsReceiptRequest request
+        @RequestHeader("Idempotency-Key")
+        @NotBlank(message = "Idempotency-Key header is required")
+        @Size(max = 100, message = "Idempotency-Key must not exceed 100 characters")
+        String idempotencyKey,
+        @Valid @RequestBody CreateGoodsReceiptRequest request
     ) {
-        GoodsReceiptResponse response = goodsReceiptService.createGoodsReceipt(request);
+        GoodsReceiptResponse response = goodsReceiptService.createGoodsReceipt(idempotencyKey, request);
         return ResponseHelper.created("Goods Receipt created successfully", response);
+    }
+
+    @PostMapping("/{code}/cancel")
+    @Operation(
+        summary = "Cancel Goods Receipt",
+        description = "Cancel a posted receipt with compensating stock movements."
+    )
+    public ResponseEntity<ApiResponse<GoodsReceiptResponse>> cancelGoodsReceipt(
+        @PathVariable String code,
+        @Valid @RequestBody CancelGoodsReceiptRequest request
+    ) {
+        return ResponseHelper.ok(goodsReceiptService.cancelGoodsReceipt(code, request));
     }
 
     @GetMapping("/details")

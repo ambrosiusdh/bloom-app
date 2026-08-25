@@ -1,5 +1,6 @@
 package com.bloom.app.domain.model;
 
+import com.bloom.app.domain.enums.GoodsReceiptStatus;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import jakarta.persistence.Id;
@@ -21,6 +22,10 @@ import lombok.Setter;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.OrderBy;
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -39,27 +44,50 @@ public class GoodsReceipt {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "code", unique = true, nullable = false)
+    @Column(name = "code", unique = true, nullable = false, updatable = false)
     private String code;
 
-    @Column(name = "received_date", nullable = false)
+    @Column(name = "received_date", nullable = false, updatable = false)
     private Instant receivedDate;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "supplier_id", nullable = false)
+    @JoinColumn(name = "supplier_id", nullable = false, updatable = false)
     private Supplier supplier;
 
-    @Column(name = "total_amount", nullable = false, precision = 19, scale = 4)
+    @Column(name = "supplier_name", nullable = false, updatable = false)
+    private String supplierNameSnapshot;
+
+    @Column(name = "create_idempotency_key", nullable = false, unique = true, length = 100, updatable = false)
+    private String createIdempotencyKey;
+
+    @Column(name = "create_request_hash", nullable = false, length = 64, updatable = false)
+    private String createRequestHash;
+
+    @Column(name = "total_amount", nullable = false, precision = 19, scale = 4, updatable = false)
     private BigDecimal totalAmount;
 
     @Column(name = "paid_amount", nullable = false, precision = 19, scale = 4)
     private BigDecimal paidAmount;
 
-    @Column(name = "description")
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private GoodsReceiptStatus status;
+
+    @Column(name = "description", updatable = false)
     private String description;
 
-    @OneToMany(mappedBy = "goodsReceipt", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OneToMany(mappedBy = "goodsReceipt", cascade = CascadeType.PERSIST)
+    @OrderBy("id ASC")
     private List<GoodsReceiptItem> items;
+
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
+
+    @Column(name = "cancelled_by")
+    private String cancelledBy;
+
+    @Column(name = "cancellation_reason")
+    private String cancellationReason;
 
     @Column(name = "created_at", nullable = false)
     @CreatedDate
@@ -68,4 +96,7 @@ public class GoodsReceipt {
     @CreatedBy
     @Column(name = "created_by")
     private String createdBy;
+
+    @Version
+    private Long version;
 }

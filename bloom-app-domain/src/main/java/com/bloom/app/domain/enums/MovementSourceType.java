@@ -5,6 +5,7 @@ public enum MovementSourceType {
     SALE,
     STOCK_ADJUSTMENT,
     GOODS_RECEIPT,
+    GOODS_RECEIPT_CANCELLATION,
     STOCK_OPNAME,
     PURCHASE,
     RETURN,

@@ -8,6 +8,8 @@ import com.bloom.app.domain.exception.CheckoutIdempotencyConflictException;
 import com.bloom.app.domain.exception.ExpenseIdempotencyConflictException;
 import com.bloom.app.domain.exception.FractionalQuantityPolicyImmutableException;
 import com.bloom.app.domain.exception.IdempotencyConflictException;
+import com.bloom.app.domain.exception.GoodsReceiptConflictException;
+import com.bloom.app.domain.exception.GoodsReceiptIdempotencyConflictException;
 import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
@@ -129,6 +131,8 @@ public class GlobalExceptionHandler {
         CashMovementIdempotencyConflictException.class,
         CheckoutIdempotencyConflictException.class,
         ExpenseIdempotencyConflictException.class,
+        GoodsReceiptConflictException.class,
+        GoodsReceiptIdempotencyConflictException.class,
         CashSessionConflictException.class
     })
     public ResponseEntity<?> handleDomainConflict(RuntimeException ex) {

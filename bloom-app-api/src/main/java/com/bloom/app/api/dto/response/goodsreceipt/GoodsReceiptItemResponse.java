@@ -8,14 +8,18 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import com.bloom.app.domain.enums.StockLocation;
+import com.bloom.app.domain.model.UnitOfMeasure;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class GoodsReceiptItemResponse {
+    private Long id;
     private ItemResponse item;
     private BigDecimal quantity;
+    private UnitOfMeasure baseUnitOfMeasure;
     private BigDecimal purchasePrice;
+    private BigDecimal lineTotal;
     private StockLocation stockLocation;
 }
