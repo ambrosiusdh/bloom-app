@@ -2,6 +2,7 @@ package com.bloom.app.api.dto.request.stockadjustment;
 
 import com.bloom.app.validation.UniqueBy;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -15,6 +16,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CreateStockAdjustmentRequest {
+    @NotBlank(message = "Reason is required")
     private String reason;
 
     @NotEmpty

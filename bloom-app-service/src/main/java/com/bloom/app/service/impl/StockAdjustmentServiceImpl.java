@@ -6,7 +6,9 @@ import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.api.dto.request.stockadjustment.FilterStockAdjustmentRequest;
 import com.bloom.app.api.dto.request.stockadjustment.StockAdjustmentItemRequest;
 import com.bloom.app.api.dto.response.stockadjustment.CsvParseResponse;
+import com.bloom.app.api.dto.response.stockadjustment.CreateStockAdjustmentResponse;
 import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
+import com.bloom.app.api.dto.response.stockmovement.StockMovementResponse;
 import com.bloom.app.domain.enums.StockAdjustmentActionType;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.Item;
@@ -17,6 +19,7 @@ import com.bloom.app.persistence.repository.StockAdjustmentRepository;
 import com.bloom.app.service.StockAdjustmentService;
 import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.mapper.StockAdjustmentMapper;
+import com.bloom.app.service.mapper.StockMovementMapper;
 import com.bloom.app.service.specification.StockAdjustmentSpecification;
 import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import jakarta.transaction.Transactional;
@@ -52,15 +55,17 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
     private final StockAdjustmentRepository stockAdjustmentRepository;
     private final ItemRepository itemRepository;
     private final StockAdjustmentMapper stockAdjustmentMapper;
+    private final StockMovementMapper stockMovementMapper;
     private final StockMovementService stockMovementService;
     private final DocumentCounterServiceImpl documentCounterService;
 
     @Override
     @Transactional
-    public StockAdjustmentResponse createStockAdjustment(CreateStockAdjustmentRequest request) {
+    public CreateStockAdjustmentResponse createStockAdjustment(CreateStockAdjustmentRequest request) {
         log.debug("StockAdjustmentService createStockAdjustment with request: {}", request);
 
         StockAdjustment stockAdjustment = stockAdjustmentMapper.createRequestToEntity(request);
+        stockAdjustment.setReason(normalizeReason(request.getReason()));
         List<StockAdjustmentItem> stockAdjustmentItems = new ArrayList<>();
 
         if (request.getItems() == null || request.getItems().isEmpty()) {
@@ -89,6 +94,10 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 case CORRECTION -> requestedQuantity;
             };
             InventoryQuantityValidator.validateStock(newStock, item.isFractionalQuantityAllowed());
+            if (itemRequest.getActionType() == StockAdjustmentActionType.CORRECTION
+                    && newStock.compareTo(previousStock) == 0) {
+                throw new IllegalArgumentException("Correction target must differ from current stock");
+            }
 
             StockAdjustmentItem stockAdjustmentItem = StockAdjustmentItem.builder()
                     .stockAdjustment(stockAdjustment)
@@ -108,9 +117,16 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
         StockAdjustment savedStockAdjustment = stockAdjustmentRepository.save(stockAdjustment);
 
         // Trigger generic movement logic
-        stockMovementService.recordManualAdjustment(savedStockAdjustment);
+        List<StockMovementResponse> movements = stockMovementService
+            .recordManualAdjustment(savedStockAdjustment)
+            .stream()
+            .map(stockMovementMapper::toResponse)
+            .toList();
 
-        return stockAdjustmentMapper.toResponse(savedStockAdjustment);
+        return CreateStockAdjustmentResponse.builder()
+            .adjustment(stockAdjustmentMapper.toResponse(savedStockAdjustment))
+            .movements(movements)
+            .build();
     }
 
     @Override
@@ -228,6 +244,13 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
         } else {
             InventoryQuantityValidator.validateIncoming(quantity, fractionalQuantityAllowed);
         }
+    }
+
+    private String normalizeReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("Reason is required");
+        }
+        return reason.trim();
     }
 
     private BigDecimal parseAdjustmentQuantity(

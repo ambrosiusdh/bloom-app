@@ -22,7 +22,9 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import java.math.BigDecimal;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -52,7 +54,7 @@ public class StockMovementServiceImpl implements StockMovementService {
             sourceType, sourceId, item, quantity, movementType, referenceNo, stockLocation, null);
     }
 
-    private void recordMovement(
+    private StockMovement recordMovement(
         MovementSourceType sourceType,
         Long sourceId,
         Item item,
@@ -125,7 +127,7 @@ public class StockMovementServiceImpl implements StockMovementService {
                 .qtyBefore(previousStock)
                 .qtyAfter(newStock)
                 .build();
-        stockMovementRepository.saveAndFlush(movement);
+        return stockMovementRepository.saveAndFlush(movement);
     }
 
     // Helper to record sales
@@ -177,23 +179,25 @@ public class StockMovementServiceImpl implements StockMovementService {
 
     // Helper for Manual Adjustments
     @Transactional
-    public void recordManualAdjustment(StockAdjustment adjustment) {
+    public List<StockMovement> recordManualAdjustment(StockAdjustment adjustment) {
+        if (adjustment == null || adjustment.getId() == null) {
+            throw new IllegalArgumentException("Stock adjustment must be persisted before recording stock");
+        }
+        List<StockMovement> persistedMovements = new ArrayList<>();
         for (StockAdjustmentItem item : adjustment.getItems()) {
             AdjustmentMovement movement = adjustmentMovement(item);
-
-            if (movement.quantity().compareTo(BigDecimal.ZERO) > 0) {
-                recordMovement(
-                    MovementSourceType.STOCK_ADJUSTMENT,
-                    adjustment.getId(),
-                    item.getItem(),
-                    movement.quantity(),
-                    movement.movementType(),
-                    adjustment.getStockAdjustmentCode(),
-                    item.getStockLocation(),
-                    item.getActionType()
-                );
-            }
+            persistedMovements.add(recordMovement(
+                MovementSourceType.STOCK_ADJUSTMENT,
+                adjustment.getId(),
+                item.getItem(),
+                movement.quantity(),
+                movement.movementType(),
+                adjustment.getStockAdjustmentCode(),
+                item.getStockLocation(),
+                item.getActionType()
+            ));
         }
+        return List.copyOf(persistedMovements);
     }
 
     @Override
@@ -272,6 +276,10 @@ public class StockMovementServiceImpl implements StockMovementService {
                     throw new IllegalStateException("Correction target must equal resulting stock");
                 }
                 BigDecimal delta = item.getNewStock().subtract(item.getPreviousStock());
+                if (delta.signum() == 0) {
+                    throw new IllegalArgumentException(
+                        "Correction target must differ from current stock");
+                }
                 yield new AdjustmentMovement(
                     delta.signum() >= 0 ? MovementType.IN : MovementType.OUT,
                     delta.abs());

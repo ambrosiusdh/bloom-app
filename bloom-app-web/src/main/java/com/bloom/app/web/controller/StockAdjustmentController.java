@@ -1,12 +1,13 @@
 package com.bloom.app.web.controller;
 
-import com.bloom.app.api.helper.PagingHelper;
-import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.api.dto.request.stockadjustment.CreateStockAdjustmentRequest;
 import com.bloom.app.api.dto.request.stockadjustment.FilterStockAdjustmentRequest;
 import com.bloom.app.api.dto.response.ApiResponse;
+import com.bloom.app.api.dto.response.stockadjustment.CreateStockAdjustmentResponse;
 import com.bloom.app.api.dto.response.stockadjustment.CsvParseResponse;
 import com.bloom.app.api.dto.response.stockadjustment.StockAdjustmentResponse;
+import com.bloom.app.api.helper.PagingHelper;
+import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.service.StockAdjustmentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -17,7 +18,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -45,10 +45,10 @@ public class StockAdjustmentController {
 
     @PostMapping
     @Operation(summary = "Create Stock Adjustment", description = "Create a new stock adjustment transaction.")
-    public ResponseEntity<ApiResponse<StockAdjustmentResponse>> createStockAdjustment(
+    public ResponseEntity<ApiResponse<CreateStockAdjustmentResponse>> createStockAdjustment(
         @Valid @RequestBody CreateStockAdjustmentRequest request
     ) {
-        StockAdjustmentResponse response = stockAdjustmentService.createStockAdjustment(request);
+        CreateStockAdjustmentResponse response = stockAdjustmentService.createStockAdjustment(request);
         return ResponseHelper.ok(response);
     }
 

@@ -28,6 +28,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -145,8 +146,14 @@ class StockMovementServiceImplTest {
             .items(List.of(adjustmentItem))
             .build();
         when(itemRepository.saveAndFlush(item)).thenReturn(item);
+        when(stockMovementRepository.saveAndFlush(any(StockMovement.class)))
+            .thenAnswer(invocation -> {
+                StockMovement movement = invocation.getArgument(0);
+                movement.setId(151L);
+                return movement;
+            });
 
-        service.recordManualAdjustment(adjustment);
+        List<StockMovement> persistedMovements = service.recordManualAdjustment(adjustment);
 
         assertThat(item.getStockStore()).isEqualByComparingTo("1.2500");
         ArgumentCaptor<StockMovement> movementCaptor = ArgumentCaptor.forClass(StockMovement.class);
@@ -157,6 +164,65 @@ class StockMovementServiceImplTest {
         assertThat(movementCaptor.getValue().getQtyAfter()).isEqualByComparingTo("1.2500");
         assertThat(movementCaptor.getValue().getAdjustmentActionType())
             .isEqualTo(StockAdjustmentActionType.CORRECTION);
+        assertThat(persistedMovements).singleElement().satisfies(movement -> {
+            assertThat(movement.getId()).isEqualTo(151L);
+            assertThat(movement.getSourceType()).isEqualTo(MovementSourceType.STOCK_ADJUSTMENT);
+            assertThat(movement.getSourceId()).isEqualTo(8L);
+            assertThat(movement.getReferenceNo()).isEqualTo("SA-8");
+        });
+    }
+
+    @Test
+    void derivesUpwardCorrectionAsPositiveInMovement() {
+        Item item = item(true, "1.0000");
+        StockAdjustment adjustment = StockAdjustment.builder()
+            .id(9L)
+            .stockAdjustmentCode("SA-9")
+            .items(List.of(StockAdjustmentItem.builder()
+                .item(item)
+                .actionType(StockAdjustmentActionType.CORRECTION)
+                .changeQuantity(new BigDecimal("1.2500"))
+                .previousStock(new BigDecimal("1.0000"))
+                .newStock(new BigDecimal("1.2500"))
+                .stockLocation(StockLocation.STORE)
+                .build()))
+            .build();
+        when(itemRepository.saveAndFlush(item)).thenReturn(item);
+        when(stockMovementRepository.saveAndFlush(any(StockMovement.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+
+        List<StockMovement> movements = service.recordManualAdjustment(adjustment);
+
+        assertThat(item.getStockStore()).isEqualByComparingTo("1.2500");
+        assertThat(movements).singleElement().satisfies(movement -> {
+            assertThat(movement.getMovementType()).isEqualTo(MovementType.IN);
+            assertThat(movement.getQuantity()).isEqualByComparingTo("0.2500");
+            assertThat(movement.getQtyBefore()).isEqualByComparingTo("1.0000");
+            assertThat(movement.getQtyAfter()).isEqualByComparingTo("1.2500");
+        });
+    }
+
+    @Test
+    void rejectsNoOpCorrectionInsteadOfFabricatingMovement() {
+        Item item = item(true, "1.0000");
+        StockAdjustment adjustment = StockAdjustment.builder()
+            .id(8L)
+            .stockAdjustmentCode("SA-8")
+            .items(List.of(StockAdjustmentItem.builder()
+                .item(item)
+                .actionType(StockAdjustmentActionType.CORRECTION)
+                .changeQuantity(new BigDecimal("1.0000"))
+                .previousStock(new BigDecimal("1.0000"))
+                .newStock(new BigDecimal("1.0000"))
+                .stockLocation(StockLocation.STORE)
+                .build()))
+            .build();
+
+        assertThatThrownBy(() -> service.recordManualAdjustment(adjustment))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Correction target must differ from current stock");
+
+        verifyNoInteractions(itemRepository, stockMovementRepository);
     }
 
     @Test
