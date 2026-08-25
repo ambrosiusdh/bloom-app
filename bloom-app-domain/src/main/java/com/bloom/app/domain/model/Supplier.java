@@ -27,17 +27,21 @@ public class Supplier {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "name", nullable = false)
+    @Column(name = "name", nullable = false, length = 255)
     private String name;
 
-    @Column(name = "code", unique = true, nullable = false)
+    @Column(name = "code", unique = true, nullable = false, length = 255, updatable = false)
     private String code;
 
-    @Column(name = "contact_number")
+    @Column(name = "contact_number", length = 255)
     private String contactNumber;
 
-    @Column(name = "address")
+    @Column(name = "address", length = 255)
     private String address;
+
+    @Column(name = "active", nullable = false)
+    @Builder.Default
+    private boolean active = true;
 
     @Column(updatable = false)
     @CreatedDate
