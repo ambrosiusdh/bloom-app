@@ -291,6 +291,12 @@ The allocation rules for payments that cover more than one receipt, overpayments
 4. Closing records the actual counted `closingCash`, `closedAt`, and changes status to `CLOSED`.
 5. A closed session cannot accept a new operation whose effect would alter that session's drawer cash.
 
+`GET /api/cash-sessions/current` represents this zero-or-one state. It returns HTTP 200 with the
+existing successful `ApiResponse<CashSessionResponse>` and session fields when an `OPEN` session
+exists. When none exists, it still returns HTTP 200 with `success: true`, `data: null`, and the
+message `No cash session is currently open`; this normal state is not a resource-not-found error.
+An unknown ID requested through `GET /api/cash-sessions/{sessionId}` remains HTTP 404.
+
 ### Sales
 
 Every cashier sale belongs to the open `CashSession`. A sale must be rejected when there is no open session, including a `QRIS` sale.

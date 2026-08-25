@@ -6,6 +6,7 @@ import com.bloom.app.api.dto.response.cashsession.CashSessionResponse;
 import com.bloom.app.api.exception.GlobalExceptionHandler;
 import com.bloom.app.domain.enums.CashSessionStatus;
 import com.bloom.app.domain.exception.CashSessionConflictException;
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.service.CashSessionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,7 +20,9 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -77,6 +80,59 @@ class CashSessionControllerTest {
         mockMvc.perform(get("/api/cash-sessions/7/expected-cash"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.expectedClosingCash").value(130.0));
+    }
+
+    @Test
+    void returnsExistingCurrentSessionUsingUnchangedSuccessfulResponse() throws Exception {
+        when(cashSessionService.getCurrentSession()).thenReturn(Optional.of(
+            CashSessionResponse.builder()
+                .id(7L)
+                .openingCash(new BigDecimal("100.0000"))
+                .expectedClosingCash(new BigDecimal("130.0000"))
+                .openedAt(Instant.parse("2026-08-18T01:00:00Z"))
+                .openedBy("admin")
+                .status(CashSessionStatus.OPEN)
+                .version(3L)
+                .build()));
+
+        mockMvc.perform(get("/api/cash-sessions/current"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.message").value("Success"))
+            .andExpect(jsonPath("$.code").value(200))
+            .andExpect(jsonPath("$.data.id").value(7))
+            .andExpect(jsonPath("$.data.openingCash").value(100.0))
+            .andExpect(jsonPath("$.data.expectedClosingCash").value(130.0))
+            .andExpect(jsonPath("$.data.actualClosingCash").value(nullValue()))
+            .andExpect(jsonPath("$.data.difference").value(nullValue()))
+            .andExpect(jsonPath("$.data.openedAt").exists())
+            .andExpect(jsonPath("$.data.openedBy").value("admin"))
+            .andExpect(jsonPath("$.data.closedAt").value(nullValue()))
+            .andExpect(jsonPath("$.data.closedBy").value(nullValue()))
+            .andExpect(jsonPath("$.data.status").value("OPEN"))
+            .andExpect(jsonPath("$.data.version").value(3));
+    }
+
+    @Test
+    void returnsSuccessfulNullResponseWhenNoCurrentSessionExists() throws Exception {
+        when(cashSessionService.getCurrentSession()).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/cash-sessions/current"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.message").value("No cash session is currently open"))
+            .andExpect(jsonPath("$.code").value(200))
+            .andExpect(jsonPath("$.data").value(nullValue()));
+    }
+
+    @Test
+    void unknownSpecificSessionIdStillReturnsNotFound() throws Exception {
+        when(cashSessionService.getSessionDetails(999L))
+            .thenThrow(new ResourceNotFoundException("Cash session not found: 999"));
+
+        mockMvc.perform(get("/api/cash-sessions/999"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.message").value("Cash session not found: 999"));
     }
 
     @Test

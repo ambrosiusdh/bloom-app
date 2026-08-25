@@ -29,6 +29,7 @@ import org.springframework.data.domain.Sort;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -75,10 +76,9 @@ public class CashSessionServiceImpl implements CashSessionService {
 
     @Override
     @Transactional(readOnly = true)
-    public CashSessionResponse getCurrentSession() {
-        CashSession session = cashSessionRepository.findFirstByStatus(CashSessionStatus.OPEN)
-            .orElseThrow(() -> new ResourceNotFoundException("No cash session is currently open"));
-        return cashSessionMapper.toResponse(session);
+    public Optional<CashSessionResponse> getCurrentSession() {
+        return cashSessionRepository.findFirstByStatus(CashSessionStatus.OPEN)
+            .map(cashSessionMapper::toResponse);
     }
 
     @Override

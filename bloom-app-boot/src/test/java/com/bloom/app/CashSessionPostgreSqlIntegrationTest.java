@@ -20,6 +20,7 @@ import com.bloom.app.domain.exception.CashMovementIdempotencyConflictException;
 import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.CheckoutIdempotencyConflictException;
 import com.bloom.app.domain.exception.ExpenseIdempotencyConflictException;
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.persistence.repository.CashMovementRepository;
 import com.bloom.app.persistence.repository.CashSessionRepository;
 import com.bloom.app.persistence.repository.ExpenseRepository;
@@ -143,6 +144,29 @@ class CashSessionPostgreSqlIntegrationTest {
         assertThat(outcomes).filteredOn(CashSessionResponse.class::isInstance).hasSize(1);
         assertThat(outcomes).filteredOn(CashSessionConflictException.class::isInstance).hasSize(1);
         assertThat(cashSessionRepository.findFirstByStatus(CashSessionStatus.OPEN)).isPresent();
+    }
+
+    @Test
+    void currentSessionLookupReturnsZeroOrOneWhileSpecificLookupStillRequiresExistingId() {
+        assertThat(cashSessionService.getCurrentSession()).isEmpty();
+
+        authenticateAdmin();
+        CashSessionResponse opened = cashSessionService.openSession(openRequest("100.0000"));
+
+        assertThat(cashSessionService.getCurrentSession())
+            .get()
+            .satisfies(current -> {
+                assertThat(current.getId()).isEqualTo(opened.getId());
+                assertThat(current.getOpeningCash()).isEqualByComparingTo("100.0000");
+                assertThat(current.getExpectedClosingCash()).isEqualByComparingTo("100.0000");
+                assertThat(current.getOpenedAt()).isNotNull();
+                assertThat(current.getOpenedBy()).isEqualTo("admin");
+                assertThat(current.getStatus()).isEqualTo(CashSessionStatus.OPEN);
+                assertThat(current.getVersion()).isEqualTo(opened.getVersion());
+            });
+        assertThatThrownBy(() -> cashSessionService.getSessionDetails(Long.MAX_VALUE))
+            .isInstanceOf(ResourceNotFoundException.class)
+            .hasMessage("Cash session not found: " + Long.MAX_VALUE);
     }
 
     @Test
