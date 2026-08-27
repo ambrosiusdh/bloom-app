@@ -6,6 +6,7 @@ import com.bloom.app.api.dto.request.supplier.SetSupplierActiveRequest;
 import com.bloom.app.api.dto.request.supplier.UpdateSupplierRequest;
 import com.bloom.app.api.dto.response.ApiResponse;
 import com.bloom.app.api.dto.response.supplier.SupplierResponse;
+import com.bloom.app.api.dto.response.supplier.SupplierOutstandingBalanceResponse;
 import com.bloom.app.api.helper.PagingHelper;
 import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.service.SupplierService;
@@ -54,6 +55,14 @@ public class SupplierController {
         @PathVariable @NotBlank @Size(max = 255) String code
     ) {
         return ResponseHelper.ok(supplierService.getSupplierDetails(code));
+    }
+
+    @GetMapping("/{code}/outstanding-balance")
+    @Operation(summary = "Get a supplier's derived outstanding accounts-payable balance")
+    public ResponseEntity<ApiResponse<SupplierOutstandingBalanceResponse>> getOutstandingBalance(
+        @PathVariable @NotBlank @Size(max = 255) String code
+    ) {
+        return ResponseHelper.ok(supplierService.getOutstandingBalance(code));
     }
 
     @PostMapping

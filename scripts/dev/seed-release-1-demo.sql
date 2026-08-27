@@ -91,67 +91,96 @@ VALUES
 
 INSERT INTO suppliers (
     name, code, contact_number, address,
-    created_at, updated_at, created_by, updated_by, version
+    active, created_at, updated_at, created_by, updated_by, version
 )
 VALUES
     (
         'PT Sumber Bangunan Demo', 'SUP-DEMO-001', '021-555-0101',
-        'Jl. Industri No. 10, Jakarta',
+        'Jl. Industri No. 10, Jakarta', TRUE,
         CURRENT_TIMESTAMP - INTERVAL '30 days', CURRENT_TIMESTAMP - INTERVAL '30 days',
         'admin', 'admin', 0
     ),
     (
         'CV Perkakas Keluarga', 'SUP-DEMO-002', '021-555-0102',
-        'Jl. Pasar Baru No. 25, Jakarta',
+        'Jl. Pasar Baru No. 25, Jakarta', TRUE,
         CURRENT_TIMESTAMP - INTERVAL '30 days', CURRENT_TIMESTAMP - INTERVAL '30 days',
         'admin', 'admin', 0
     );
 
 INSERT INTO goods_receipts (
     code, received_date, supplier_name, supplier_id,
-    total_amount, paid_amount, description, created_at, created_by
+    total_amount, description, created_at, created_by,
+    create_idempotency_key, create_request_hash, status, version
 )
 VALUES
     (
         'GR/DEMO/0001', CURRENT_TIMESTAMP - INTERVAL '12 days',
         'CV Perkakas Keluarga',
         (SELECT id FROM suppliers WHERE code = 'SUP-DEMO-002'),
-        1606000.0000, 1000000.0000,
+        1606000.0000,
         'Penerimaan stok paku dan kabel demo',
-        CURRENT_TIMESTAMP - INTERVAL '12 days', 'admin'
+        CURRENT_TIMESTAMP - INTERVAL '12 days', 'admin',
+        'demo-goods-receipt-0001', REPEAT('1', 64), 'POSTED', 0
     ),
     (
         'GR/DEMO/0002', CURRENT_TIMESTAMP - INTERVAL '9 days',
         'PT Sumber Bangunan Demo',
         (SELECT id FROM suppliers WHERE code = 'SUP-DEMO-001'),
-        3771250.0000, 3771250.0000,
+        3771250.0000,
         'Penerimaan stok gudang semen dan cat demo',
-        CURRENT_TIMESTAMP - INTERVAL '9 days', 'admin'
+        CURRENT_TIMESTAMP - INTERVAL '9 days', 'admin',
+        'demo-goods-receipt-0002', REPEAT('2', 64), 'POSTED', 0
     );
 
 INSERT INTO goods_receipt_items (
-    goods_receipt_id, item_id, quantity, purchase_price, stock_location
+    goods_receipt_id, item_id, quantity, purchase_price, stock_location,
+    base_unit_of_measure, line_total
 )
 VALUES
     (
         (SELECT id FROM goods_receipts WHERE code = 'GR/DEMO/0001'),
         (SELECT id FROM items WHERE sku = 'DEMO-PRT-001'),
-        100.5000, 12000.0000, 'STORE'
+        100.5000, 12000.0000, 'STORE', 'KILOGRAM', 1206000.0000
     ),
     (
         (SELECT id FROM goods_receipts WHERE code = 'GR/DEMO/0001'),
         (SELECT id FROM items WHERE sku = 'DEMO-LNN-001'),
-        50.0000, 8000.0000, 'WAREHOUSE'
+        50.0000, 8000.0000, 'WAREHOUSE', 'METER', 400000.0000
     ),
     (
         (SELECT id FROM goods_receipts WHERE code = 'GR/DEMO/0002'),
         (SELECT id FROM items WHERE sku = 'DEMO-BB-001'),
-        20.0000, 60000.0000, 'WAREHOUSE'
+        20.0000, 60000.0000, 'WAREHOUSE', 'PIECE', 1200000.0000
     ),
     (
         (SELECT id FROM goods_receipts WHERE code = 'GR/DEMO/0002'),
         (SELECT id FROM items WHERE sku = 'DEMO-BB-002'),
-        30.2500, 85000.0000, 'WAREHOUSE'
+        30.2500, 85000.0000, 'WAREHOUSE', 'LITER', 2571250.0000
+    );
+
+INSERT INTO supplier_payments (
+    goods_receipt_id, supplier_id, cash_session_id, amount, payment_method,
+    paid_at, reference, note, actor, is_voided,
+    idempotency_key, request_hash, created_at, version
+)
+VALUES
+    (
+        (SELECT id FROM goods_receipts WHERE code = 'GR/DEMO/0001'),
+        (SELECT id FROM suppliers WHERE code = 'SUP-DEMO-002'),
+        NULL, 1000000.0000, 'BANK_TRANSFER',
+        CURRENT_TIMESTAMP - INTERVAL '11 days', 'DEMO-BANK-0001',
+        'Pembayaran sebagian demo', 'admin', FALSE,
+        'demo-supplier-payment-0001', REPEAT('3', 64),
+        CURRENT_TIMESTAMP - INTERVAL '11 days', 0
+    ),
+    (
+        (SELECT id FROM goods_receipts WHERE code = 'GR/DEMO/0002'),
+        (SELECT id FROM suppliers WHERE code = 'SUP-DEMO-001'),
+        NULL, 3771250.0000, 'QRIS',
+        CURRENT_TIMESTAMP - INTERVAL '8 days', 'DEMO-QRIS-0002',
+        'Pelunasan demo', 'admin', FALSE,
+        'demo-supplier-payment-0002', REPEAT('4', 64),
+        CURRENT_TIMESTAMP - INTERVAL '8 days', 0
     );
 
 INSERT INTO stock_transfers (

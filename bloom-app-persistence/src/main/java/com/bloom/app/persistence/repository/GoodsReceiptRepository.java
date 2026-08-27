@@ -10,6 +10,7 @@ import jakarta.persistence.LockModeType;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.Optional;
 
 @Repository
@@ -30,12 +31,29 @@ public interface GoodsReceiptRepository extends JpaRepository<GoodsReceipt, Long
     @Query("SELECT receipt FROM GoodsReceipt receipt WHERE receipt.code = :code")
     Optional<GoodsReceipt> findDetailsByCode(@Param("code") String code);
 
+    @EntityGraph(attributePaths = {"supplier"})
+    @Query("SELECT receipt FROM GoodsReceipt receipt WHERE receipt.code = :code")
+    Optional<GoodsReceipt> findHeaderByCode(@Param("code") String code);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @EntityGraph(attributePaths = {"supplier", "items", "items.item", "items.item.category"})
     @Query("SELECT DISTINCT receipt FROM GoodsReceipt receipt WHERE receipt.code = :code")
     Optional<GoodsReceipt> findByCodeForUpdate(@Param("code") String code);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @EntityGraph(attributePaths = {"supplier"})
+    @Query("SELECT receipt FROM GoodsReceipt receipt WHERE receipt.code = :code")
+    Optional<GoodsReceipt> findPaymentHeaderByCodeForUpdate(@Param("code") String code);
+
     boolean existsBySupplierId(Long supplierId);
+
+    @Query("""
+        SELECT COALESCE(SUM(receipt.totalAmount), 0)
+        FROM GoodsReceipt receipt
+        WHERE receipt.supplier.id = :supplierId
+          AND receipt.status = com.bloom.app.domain.enums.GoodsReceiptStatus.POSTED
+        """)
+    BigDecimal sumPostedTotalBySupplierId(@Param("supplierId") Long supplierId);
 
     @Query("SELECT COUNT(g) FROM GoodsReceipt g WHERE g.createdAt BETWEEN :start AND :end")
     long countByCreatedAtBetween(Instant start, Instant end);

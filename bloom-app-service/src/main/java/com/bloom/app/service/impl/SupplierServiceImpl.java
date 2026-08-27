@@ -4,14 +4,17 @@ import com.bloom.app.api.dto.request.supplier.CreateSupplierRequest;
 import com.bloom.app.api.dto.request.supplier.FilterSupplierRequest;
 import com.bloom.app.api.dto.request.supplier.UpdateSupplierRequest;
 import com.bloom.app.api.dto.response.supplier.SupplierResponse;
+import com.bloom.app.api.dto.response.supplier.SupplierOutstandingBalanceResponse;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.model.Supplier;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
 import com.bloom.app.persistence.repository.SupplierRepository;
+import com.bloom.app.persistence.repository.SupplierPaymentRepository;
 import com.bloom.app.service.SupplierService;
 import com.bloom.app.service.mapper.SupplierMapper;
 import com.bloom.app.service.specification.SupplierSpecification;
+import com.bloom.app.service.util.CashMoneyUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -20,6 +23,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -27,6 +32,7 @@ public class SupplierServiceImpl implements SupplierService {
     private final SupplierRepository supplierRepository;
     private final GoodsReceiptRepository goodsReceiptRepository;
     private final SupplierMapper supplierMapper;
+    private final SupplierPaymentRepository supplierPaymentRepository;
 
     @Override
     @Transactional
@@ -62,6 +68,30 @@ public class SupplierServiceImpl implements SupplierService {
     @Transactional(readOnly = true)
     public SupplierResponse getSupplierDetails(String code) {
         return supplierMapper.entityToResponse(findSupplier(code));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SupplierOutstandingBalanceResponse getOutstandingBalance(String code) {
+        Supplier supplier = findSupplier(code);
+        BigDecimal totalPosted = normalizedMoney(
+            goodsReceiptRepository.sumPostedTotalBySupplierId(supplier.getId()));
+        BigDecimal validPayments = normalizedMoney(
+            supplierPaymentRepository.sumValidAmountByPostedReceiptSupplierId(supplier.getId()));
+        return SupplierOutstandingBalanceResponse.builder()
+            .supplierId(supplier.getId())
+            .supplierCode(supplier.getCode())
+            .supplierName(supplier.getName())
+            .totalPostedAmount(totalPosted)
+            .validPayments(validPayments)
+            .outstandingAmount(CashMoneyUtil.reconciliationBoundary(
+                totalPosted.subtract(validPayments)))
+            .build();
+    }
+
+    private BigDecimal normalizedMoney(BigDecimal value) {
+        return CashMoneyUtil.reconciliationBoundary(
+            value == null ? BigDecimal.ZERO : value);
     }
 
     @Override

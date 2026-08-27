@@ -4,9 +4,12 @@ import com.bloom.app.api.dto.request.goodsreceipt.CancelGoodsReceiptRequest;
 import com.bloom.app.api.dto.request.goodsreceipt.CreateGoodsReceiptItemRequest;
 import com.bloom.app.api.dto.request.goodsreceipt.CreateGoodsReceiptRequest;
 import com.bloom.app.api.dto.response.goodsreceipt.GoodsReceiptResponse;
+import com.bloom.app.api.dto.request.supplierpayment.CreateSupplierPaymentRequest;
 import com.bloom.app.domain.enums.GoodsReceiptStatus;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.StockLocation;
+import com.bloom.app.domain.enums.SupplierPaymentMethod;
+import com.bloom.app.domain.enums.SupplierPaymentStatus;
 import com.bloom.app.domain.exception.GoodsReceiptConflictException;
 import com.bloom.app.domain.exception.GoodsReceiptIdempotencyConflictException;
 import com.bloom.app.domain.model.GoodsReceipt;
@@ -18,6 +21,7 @@ import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.StockMovementRepository;
 import com.bloom.app.persistence.repository.SupplierRepository;
 import com.bloom.app.service.GoodsReceiptService;
+import com.bloom.app.service.SupplierPaymentService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -47,6 +51,9 @@ class GoodsReceiptPostgreSqlIntegrationTest {
 
     @Autowired
     private GoodsReceiptService goodsReceiptService;
+
+    @Autowired
+    private SupplierPaymentService supplierPaymentService;
 
     @Autowired
     private GoodsReceiptRepository goodsReceiptRepository;
@@ -117,6 +124,9 @@ class GoodsReceiptPostgreSqlIntegrationTest {
         assertThat(created.getSupplierCode()).isEqualTo(supplier.getCode());
         assertThat(created.getSupplierName()).isEqualTo(supplier.getName());
         assertThat(created.getTotalAmount()).isEqualByComparingTo(expectedTotal);
+        assertThat(created.getPaidAmount()).isEqualByComparingTo("0.0000");
+        assertThat(created.getOutstandingAmount()).isEqualByComparingTo(expectedTotal);
+        assertThat(created.getPaymentStatus()).isEqualTo(SupplierPaymentStatus.UNPAID);
         assertThat(created.getItems()).extracting(line -> line.getPurchasePrice())
             .containsExactly(new BigDecimal("2.3456"), new BigDecimal("1.1111"));
         assertThat(created.getItems()).extracting(line -> line.getLineTotal())
@@ -130,7 +140,6 @@ class GoodsReceiptPostgreSqlIntegrationTest {
             .orElseThrow();
         assertThat(saved.getSupplier().getId()).isEqualTo(supplier.getId());
         assertThat(saved.getSupplierNameSnapshot()).isEqualTo(supplier.getName());
-        assertThat(saved.getPaidAmount()).isEqualByComparingTo("0.0000");
         assertThat(stockMovementRepository.findBySourceTypeAndSourceId(
             MovementSourceType.GOODS_RECEIPT, saved.getId())).hasSize(2);
         assertThat(itemRepository.findById(item.getId()).orElseThrow()).satisfies(postedItem -> {
@@ -188,9 +197,15 @@ class GoodsReceiptPostgreSqlIntegrationTest {
             "goods-receipt-" + UUID.randomUUID(),
             request(supplier.getCode(), List.of(
                 line(item.getSku(), "1.0000", "4.0000", StockLocation.WAREHOUSE))));
-        jdbcTemplate.update(
-            "UPDATE goods_receipts SET paid_amount = 1.0000, version = version + 1 WHERE id = ?",
-            paid.getId());
+        supplierPaymentService.createPayment(
+            paid.getCode(),
+            "payment-" + UUID.randomUUID(),
+            CreateSupplierPaymentRequest.builder()
+                .amount(new BigDecimal("1.0000"))
+                .paymentMethod(SupplierPaymentMethod.BANK_TRANSFER)
+                .paidAt(Instant.parse("2026-08-25T11:00:00Z"))
+                .reference("BANK-REF")
+                .build());
 
         assertThatThrownBy(() -> goodsReceiptService.cancelGoodsReceipt(
             paid.getCode(), CancelGoodsReceiptRequest.builder().reason("Not allowed").build()))

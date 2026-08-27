@@ -13,6 +13,8 @@ import com.bloom.app.domain.exception.GoodsReceiptIdempotencyConflictException;
 import com.bloom.app.domain.exception.InsufficientStockException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
+import com.bloom.app.domain.exception.SupplierPaymentConflictException;
+import com.bloom.app.domain.exception.SupplierPaymentIdempotencyConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
@@ -133,7 +135,9 @@ public class GlobalExceptionHandler {
         ExpenseIdempotencyConflictException.class,
         GoodsReceiptConflictException.class,
         GoodsReceiptIdempotencyConflictException.class,
-        CashSessionConflictException.class
+        CashSessionConflictException.class,
+        SupplierPaymentConflictException.class,
+        SupplierPaymentIdempotencyConflictException.class
     })
     public ResponseEntity<?> handleDomainConflict(RuntimeException ex) {
         return domainError(ex, HttpStatus.CONFLICT);

@@ -8,6 +8,7 @@ import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.model.Supplier;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
 import com.bloom.app.persistence.repository.SupplierRepository;
+import com.bloom.app.persistence.repository.SupplierPaymentRepository;
 import com.bloom.app.service.mapper.SupplierMapper;
 import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
@@ -30,10 +31,13 @@ class SupplierServiceImplTest {
     private final SupplierRepository supplierRepository = mock(SupplierRepository.class);
     private final GoodsReceiptRepository goodsReceiptRepository = mock(GoodsReceiptRepository.class);
     private final SupplierMapper supplierMapper = Mappers.getMapper(SupplierMapper.class);
+    private final SupplierPaymentRepository supplierPaymentRepository =
+        mock(SupplierPaymentRepository.class);
     private final SupplierServiceImpl service = new SupplierServiceImpl(
         supplierRepository,
         goodsReceiptRepository,
-        supplierMapper
+        supplierMapper,
+        supplierPaymentRepository
     );
 
     @Test
