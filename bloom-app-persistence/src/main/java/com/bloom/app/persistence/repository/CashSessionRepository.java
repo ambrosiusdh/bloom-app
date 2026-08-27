@@ -3,6 +3,8 @@ package com.bloom.app.persistence.repository;
 import com.bloom.app.domain.enums.CashSessionStatus;
 import com.bloom.app.domain.model.CashSession;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -28,6 +30,21 @@ public interface CashSessionRepository extends JpaRepository<CashSession, Long>,
     @Override
     @EntityGraph(attributePaths = {"openedBy", "closedBy"})
     Optional<CashSession> findById(Long id);
+
+    @EntityGraph(attributePaths = {"openedBy", "closedBy"})
+    @Query(
+        value = "SELECT session FROM CashSession session",
+        countQuery = "SELECT COUNT(session) FROM CashSession session"
+    )
+    Page<CashSession> findAllHistory(Pageable pageable);
+
+    @EntityGraph(attributePaths = {"openedBy", "closedBy"})
+    @Query(
+        value = "SELECT session FROM CashSession session WHERE session.status = :status",
+        countQuery = "SELECT COUNT(session) FROM CashSession session WHERE session.status = :status"
+    )
+    Page<CashSession> findAllHistoryByStatus(
+        @Param("status") CashSessionStatus status, Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT session FROM CashSession session WHERE session.id = :id")

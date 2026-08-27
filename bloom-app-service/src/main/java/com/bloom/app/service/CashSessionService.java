@@ -5,6 +5,7 @@ import com.bloom.app.api.dto.request.cashsession.OpenCashSessionRequest;
 import com.bloom.app.api.dto.response.cashsession.CashReconciliationResponse;
 import com.bloom.app.api.dto.response.cashsession.CashMovementResponse;
 import com.bloom.app.api.dto.response.cashsession.CashSessionResponse;
+import com.bloom.app.domain.enums.CashSessionStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -14,6 +15,9 @@ public interface CashSessionService {
     CashSessionResponse openSession(OpenCashSessionRequest request);
 
     Optional<CashSessionResponse> getCurrentSession();
+
+    Page<CashSessionResponse> getSessionHistory(
+        CashSessionStatus status, Pageable pageable);
 
     CashSessionResponse getSessionDetails(Long sessionId);
 

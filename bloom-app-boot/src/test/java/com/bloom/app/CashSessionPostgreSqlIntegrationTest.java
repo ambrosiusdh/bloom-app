@@ -36,6 +36,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.hibernate.SessionFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
@@ -48,6 +49,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
+import jakarta.persistence.EntityManagerFactory;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -101,8 +103,12 @@ class CashSessionPostgreSqlIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private EntityManagerFactory entityManagerFactory;
+
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.jpa.properties.hibernate.generate_statistics", () -> "true");
         if (POSTGRES != null) {
             registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
             registry.add("spring.datasource.username", POSTGRES::getUsername);
@@ -167,6 +173,92 @@ class CashSessionPostgreSqlIntegrationTest {
         assertThatThrownBy(() -> cashSessionService.getSessionDetails(Long.MAX_VALUE))
             .isInstanceOf(ResourceNotFoundException.class)
             .hasMessage("Cash session not found: " + Long.MAX_VALUE);
+    }
+
+    @Test
+    void historyListsAndFiltersAuthoritativeSnapshotsWithoutActorNPlusOneReads() {
+        Long adminId = jdbcTemplate.queryForObject(
+            "SELECT id FROM users WHERE username = 'admin'", Long.class);
+        Long olderClosedId = jdbcTemplate.queryForObject("""
+            INSERT INTO cash_sessions (
+                opened_by_id, closed_by_id, opening_cash, expected_closing_cash,
+                actual_closing_cash, difference, status, opened_at, closed_at, version
+            ) VALUES (?, ?, 100.0000, 130.0000, 125.0000, -5.0000,
+                'CLOSED', ?, ?, 0)
+            RETURNING id
+            """, Long.class, adminId, adminId,
+                java.sql.Timestamp.from(java.time.Instant.parse("2126-08-20T01:02:03Z")),
+                java.sql.Timestamp.from(java.time.Instant.parse("2126-08-20T09:10:11Z")));
+        Long newerClosedId = jdbcTemplate.queryForObject("""
+            INSERT INTO cash_sessions (
+                opened_by_id, closed_by_id, opening_cash, expected_closing_cash,
+                actual_closing_cash, difference, status, opened_at, closed_at, version
+            ) VALUES (?, ?, 200.0000, 240.0000, 241.0000, 1.0000,
+                'CLOSED', ?, ?, 0)
+            RETURNING id
+            """, Long.class, adminId, adminId,
+                java.sql.Timestamp.from(java.time.Instant.parse("2126-08-20T01:02:03Z")),
+                java.sql.Timestamp.from(java.time.Instant.parse("2126-08-20T10:10:11Z")));
+        Long openId = jdbcTemplate.queryForObject("""
+            INSERT INTO cash_sessions (
+                opened_by_id, opening_cash, expected_closing_cash,
+                actual_closing_cash, difference, status, opened_at, closed_at,
+                closed_by_id, version
+            ) VALUES (?, 75.0000, 75.0000, NULL, NULL, 'OPEN',
+                ?, NULL, NULL, 0)
+            RETURNING id
+            """, Long.class, adminId,
+                java.sql.Timestamp.from(java.time.Instant.parse("2126-08-21T01:02:03Z")));
+
+        SessionFactory sessionFactory = entityManagerFactory.unwrap(SessionFactory.class);
+        sessionFactory.getStatistics().clear();
+        Page<CashSessionResponse> unfiltered = cashSessionService.getSessionHistory(
+            null, PageRequest.of(0, 3));
+
+        assertThat(unfiltered.getContent()).extracting(CashSessionResponse::getId)
+            .containsExactly(openId, newerClosedId, olderClosedId);
+        assertThat(sessionFactory.getStatistics().getPrepareStatementCount()).isLessThanOrEqualTo(2);
+
+        Page<CashSessionResponse> openOnly = cashSessionService.getSessionHistory(
+            CashSessionStatus.OPEN, PageRequest.of(0, 10));
+        assertThat(openOnly.getContent()).singleElement().satisfies(open -> {
+            assertThat(open.getId()).isEqualTo(openId);
+            assertThat(open.getOpeningCash()).isEqualByComparingTo("75.0000");
+            assertThat(open.getExpectedClosingCash()).isEqualByComparingTo("75.0000");
+            assertThat(open.getActualClosingCash()).isNull();
+            assertThat(open.getDifference()).isNull();
+            assertThat(open.getStatus()).isEqualTo(CashSessionStatus.OPEN);
+            assertThat(open.getOpenedAt()).isEqualTo(
+                java.time.Instant.parse("2126-08-21T01:02:03Z"));
+            assertThat(open.getOpenedBy()).isEqualTo("admin");
+            assertThat(open.getClosedAt()).isNull();
+            assertThat(open.getClosedBy()).isNull();
+        });
+
+        Page<CashSessionResponse> closedOnly = cashSessionService.getSessionHistory(
+            CashSessionStatus.CLOSED, PageRequest.of(0, 2));
+        assertThat(closedOnly.getContent()).extracting(CashSessionResponse::getId)
+            .containsExactly(newerClosedId, olderClosedId);
+        assertThat(closedOnly.getContent().getFirst()).satisfies(closed -> {
+            assertThat(closed.getOpeningCash()).isEqualByComparingTo("200.0000");
+            assertThat(closed.getExpectedClosingCash()).isEqualByComparingTo("240.0000");
+            assertThat(closed.getActualClosingCash()).isEqualByComparingTo("241.0000");
+            assertThat(closed.getDifference()).isEqualByComparingTo("1.0000");
+            assertThat(closed.getStatus()).isEqualTo(CashSessionStatus.CLOSED);
+            assertThat(closed.getOpenedAt()).isEqualTo(
+                java.time.Instant.parse("2126-08-20T01:02:03Z"));
+            assertThat(closed.getOpenedBy()).isEqualTo("admin");
+            assertThat(closed.getClosedAt()).isEqualTo(
+                java.time.Instant.parse("2126-08-20T10:10:11Z"));
+            assertThat(closed.getClosedBy()).isEqualTo("admin");
+        });
+
+        sessionFactory.getStatistics().clear();
+        CashSessionResponse detail = cashSessionService.getSessionDetails(newerClosedId);
+        assertThat(detail.getActualClosingCash()).isEqualByComparingTo("241.0000");
+        assertThat(detail.getOpenedBy()).isEqualTo("admin");
+        assertThat(detail.getClosedBy()).isEqualTo("admin");
+        assertThat(sessionFactory.getStatistics().getPrepareStatementCount()).isEqualTo(1);
     }
 
     @Test
