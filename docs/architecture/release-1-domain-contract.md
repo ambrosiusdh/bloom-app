@@ -249,9 +249,11 @@ Supplier debt means only the amount Bloom owes a supplier for recorded goods rec
 | Cash session | opening cash; actual counted closing cash | cash sales, cash supplier payments, active expenses, expected closing cash, and variance |
 | Item stock | `StockMovement` facts | `Item.stockStore` and `Item.stockWarehouse` balances |
 
-Client-supplied sale subtotals/totals and goods-receipt subtotals/totals are not authoritative. If they are accepted for compatibility, the backend must recompute them and reject a mismatch rather than persist an inconsistent value.
+Client-supplied sale subtotals/totals and goods-receipt subtotals/totals are not authoritative. If they are accepted for compatibility, the backend must recompute them and reject a mismatch rather than persist an inconsistent value. The frontend may collect sale lines, discounts, and payment inputs, but it cannot authoritatively calculate or persist the sale subtotal, total, or change.
 
-The current `Sale.paidAmount` meaning is unresolved. Drawer reconciliation must use the recorded `Sale.totalAmount` for a `CASH` sale, not an ambiguous tendered or client-provided `paidAmount`.
+For a `CASH` sale, `Sale.paidAmount` is the tendered cash received from the customer. It must be at least the backend-calculated `Sale.totalAmount`, and the backend alone calculates `Sale.changeAmount` as `paidAmount - totalAmount`. The drawer increases by `Sale.totalAmount`, never by the tendered `paidAmount`.
+
+For a `QRIS` sale, `Sale.paidAmount` is the externally confirmed settlement input. It must exactly equal the backend-recalculated `Sale.totalAmount`, `Sale.changeAmount` is zero, and the sale has no physical drawer effect.
 
 ### Receipt and payment lifecycle
 
@@ -374,10 +376,54 @@ history row. Open sessions must not fabricate `actualClosingCash`, `difference`,
 
 Every cashier sale belongs to the open `CashSession`. A sale must be rejected when there is no open session, including a `QRIS` sale.
 
-- A `CASH` sale increases expected drawer cash by `Sale.totalAmount`.
-- A `QRIS` sale has zero drawer effect.
+- The backend loads authoritative items and their prices, calculates each line subtotal, calculates the sale subtotal, applies the discount, and calculates the total and change. A client does not submit authoritative subtotal, total, or change fields.
+- A `CASH` request supplies tendered cash as `paidAmount`. It is rejected when `paidAmount < Sale.totalAmount`; otherwise `changeAmount = paidAmount - Sale.totalAmount`. Expected drawer cash increases by `Sale.totalAmount`, not by `paidAmount`.
+- A `QRIS` request supplies the externally confirmed settlement as `paidAmount`. It is rejected unless that amount exactly equals `Sale.totalAmount`; `changeAmount` is zero and the sale has zero drawer effect.
 
 This contract does not add `BANK_TRANSFER` as a sale payment method. The current sale `PaymentType` values `CASH` and `QRIS` remain the Release 1 sales scope.
+
+#### Sale checkout idempotency and ambiguous-outcome recovery
+
+`POST /api/sales` requires an `Idempotency-Key` header. The backend trims the key, rejects a missing or blank key, and rejects a normalized key longer than 100 characters. Repeating an identical canonical checkout with the same key returns the original committed sale without another stock deduction or cash movement. Reusing the key for changed canonical checkout content returns HTTP 409.
+
+`GET /api/sales/checkout-status` accepts the original `Idempotency-Key` under the same normalization and validation rules and returns `ApiResponse<SaleCheckoutStatusResponse>`:
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "code": 200,
+  "data": {
+    "status": "COMPLETED",
+    "sale": {
+      "code": "SALE-000123",
+      "sessionId": 7,
+      "subtotalAmount": 20.0000,
+      "discountAmount": 0.0000,
+      "totalAmount": 20.0000,
+      "paidAmount": 25.0000,
+      "changeAmount": 5.0000,
+      "paymentType": "CASH",
+      "description": "",
+      "createdAt": "2026-08-29T01:02:03Z",
+      "updatedAt": "2026-08-29T01:02:03Z",
+      "createdBy": "admin",
+      "updatedBy": "admin",
+      "saleItems": []
+    }
+  }
+}
+```
+
+- `COMPLETED` means a committed sale is visible for the key and `sale` contains the complete backend-confirmed `SaleResponse`, including its code, cash-session link, decimal lines and amounts, payment type, and audit fields.
+- `UNKNOWN` means no committed sale is visible for the key at lookup time and returns HTTP 200 with `sale: null`. It is not proof that the original POST failed.
+- The frontend retains the original key and may poll this endpoint or explicitly retry the identical POST with that same key after an ambiguous outcome.
+- The lookup takes the same per-checkout-key advisory transaction lock before querying. It therefore waits for a same-key checkout already inside its transaction to commit or roll back.
+- The lookup is read-only in domain behavior: it never creates a sale, reserves or mutates stock, changes a cash session, records stock/cash movements, or invokes checkout creation.
+- A checkout that begins only after an `UNKNOWN` lookup is still protected by the same-key POST idempotency rules. Release 1 does not report `PENDING` because no reliable persisted state proves that outcome.
+- Neither the stored idempotency key nor `checkoutRequestHash` is exposed in `SaleResponse`.
+
+The sale checkout HTTP error contract is: malformed/invalid input is HTTP 400; an actually missing referenced item is HTTP 404; changed-content idempotency reuse, no/open-session races, and authoritative insufficient-stock conflicts are HTTP 409. Error responses retain the existing API error shape and expose a stable domain exception type or sale error code without returning raw SQL or persistence details.
 
 ### Expenses
 
@@ -504,9 +550,8 @@ The following are recommendations, not approved product features:
 The approved contract is sufficient for planning, but these decisions are required before the affected implementation can be completed:
 
 1. The allowed `baseUnitOfMeasure` values and whether they are stored as an enum, controlled code, or another representation.
-2. The precise meaning of `Sale.paidAmount` (for example, sale value versus cash tender) and whether a separate change-due value is needed.
-3. Supplier-payment allocation across receipts, overpayment handling, and the supplier-payment void/reversal policy.
-4. Goods-receipt cancellation/return and sale void/refund lifecycles.
-5. A future post-close expense-correction workflow that does not mutate a reconciled session.
-6. Cash-session reopen policy and authorization, if reopening is to exist at all.
-7. The React web client API contract, because that client is not present in this repository.
+2. Supplier-payment allocation across receipts, overpayment handling, and the supplier-payment void/reversal policy.
+3. Goods-receipt cancellation/return and sale void/refund lifecycles.
+4. A future post-close expense-correction workflow that does not mutate a reconciled session.
+5. Cash-session reopen policy and authorization, if reopening is to exist at all.
+6. The React web client API contract beyond the sale checkout contract documented above, because that client is not present in this repository.

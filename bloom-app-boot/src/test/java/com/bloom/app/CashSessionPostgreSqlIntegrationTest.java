@@ -9,6 +9,7 @@ import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
 import com.bloom.app.api.dto.response.cashsession.CashMovementResponse;
 import com.bloom.app.api.dto.response.cashsession.CashSessionResponse;
 import com.bloom.app.api.dto.response.expense.ExpenseResponse;
+import com.bloom.app.api.dto.response.sale.SaleCheckoutStatusResponse;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.domain.enums.CashMovementType;
 import com.bloom.app.domain.enums.CashSessionStatus;
@@ -16,6 +17,8 @@ import com.bloom.app.domain.enums.ExpenseCategory;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.PaymentType;
 import com.bloom.app.domain.enums.StockLocation;
+import com.bloom.app.domain.error.ErrorCode;
+import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.exception.CashMovementIdempotencyConflictException;
 import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.CheckoutIdempotencyConflictException;
@@ -458,10 +461,102 @@ class CashSessionPostgreSqlIntegrationTest {
     }
 
     @Test
-    void qrisRequiresExactPaymentAndHasNoPhysicalCashMovement() {
+    void completedCheckoutCanBeRecoveredWithItsFullOriginalSaleResponse() {
         authenticateAdmin();
         Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        ItemFixture item = insertCheckoutItem("RECOVER", "10.0000", "5.0000");
+        String checkoutKey = "recover-checkout-" + UUID.randomUUID();
+
+        SaleResponse created = saleService.createSale(
+            checkoutKey,
+            checkoutRequest(PaymentType.CASH, "25.0000", item.sku(), "2.0000"));
+        SaleCheckoutStatusResponse recovered = saleService.getCheckoutStatus(checkoutKey);
+
+        assertThat(recovered.getStatus())
+            .isEqualTo(SaleCheckoutStatusResponse.Status.COMPLETED);
+        assertThat(recovered.getSale()).satisfies(sale -> {
+            assertThat(sale.getCode()).isEqualTo(created.getCode());
+            assertThat(sale.getSessionId()).isEqualTo(sessionId);
+            assertThat(sale.getSubtotalAmount()).isEqualByComparingTo("20.0000");
+            assertThat(sale.getDiscountAmount()).isEqualByComparingTo("0.0000");
+            assertThat(sale.getTotalAmount()).isEqualByComparingTo("20.0000");
+            assertThat(sale.getPaidAmount()).isEqualByComparingTo("25.0000");
+            assertThat(sale.getChangeAmount()).isEqualByComparingTo("5.0000");
+            assertThat(sale.getPaymentType()).isEqualTo(PaymentType.CASH);
+            assertThat(sale.getCreatedAt()).isNotNull();
+            assertThat(sale.getUpdatedAt()).isNotNull();
+            assertThat(sale.getCreatedBy()).isEqualTo("admin");
+            assertThat(sale.getUpdatedBy()).isEqualTo("admin");
+            assertThat(sale.getSaleItems()).singleElement().satisfies(line -> {
+                assertThat(line.getItem().getSku()).isEqualTo(item.sku());
+                assertThat(line.getQuantity()).isEqualByComparingTo("2.0000");
+                assertThat(line.getUnitPrice()).isEqualByComparingTo("10.0000");
+                assertThat(line.getSubtotal()).isEqualByComparingTo("20.0000");
+            });
+        });
+    }
+
+    @Test
+    void unusedCheckoutLookupReturnsUnknownWithoutAnyMutation() {
+        ItemFixture item = insertCheckoutItem("UNKNOWN", "10.0000", "5.0000");
+        String checkoutKey = "unused-checkout-" + UUID.randomUUID();
+        long saleCountBefore = saleRepository.count();
+        long movementCountBefore = stockMovementRepository.count();
+        long cashMovementCountBefore = cashMovementRepository.count();
+
+        SaleCheckoutStatusResponse response = saleService.getCheckoutStatus(checkoutKey);
+
+        assertThat(response.getStatus())
+            .isEqualTo(SaleCheckoutStatusResponse.Status.UNKNOWN);
+        assertThat(response.getSale()).isNull();
+        assertThat(saleRepository.count()).isEqualTo(saleCountBefore);
+        assertThat(stockMovementRepository.count()).isEqualTo(movementCountBefore);
+        assertThat(cashMovementRepository.count()).isEqualTo(cashMovementCountBefore);
+        assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
+            .isEqualByComparingTo("5.0000");
+    }
+
+    @Test
+    void unknownThenIdenticalPostCreatesOnceAndBecomesCompleted() {
+        authenticateAdmin();
+        cashSessionService.openSession(openRequest("100.0000"));
+        ItemFixture item = insertCheckoutItem("UNKNOWN-THEN-POST", "10.0000", "5.0000");
+        String checkoutKey = "unknown-then-post-" + UUID.randomUUID();
+        CreateSaleRequest request = checkoutRequest(
+            PaymentType.CASH, "10.0000", item.sku(), "1.0000");
+
+        assertThat(saleService.getCheckoutStatus(checkoutKey).getStatus())
+            .isEqualTo(SaleCheckoutStatusResponse.Status.UNKNOWN);
+        SaleResponse created = saleService.createSale(checkoutKey, request);
+        SaleResponse retried = saleService.createSale(checkoutKey, request);
+        SaleCheckoutStatusResponse recovered = saleService.getCheckoutStatus(checkoutKey);
+
+        assertThat(retried.getCode()).isEqualTo(created.getCode());
+        assertThat(recovered.getStatus())
+            .isEqualTo(SaleCheckoutStatusResponse.Status.COMPLETED);
+        assertThat(recovered.getSale().getCode()).isEqualTo(created.getCode());
+        var persisted = saleRepository.findByCheckoutIdempotencyKey(checkoutKey).orElseThrow();
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM sales WHERE checkout_idempotency_key = ?",
+            Long.class, checkoutKey)).isEqualTo(1L);
+        assertThat(stockMovementRepository.findBySourceTypeAndSourceId(
+            MovementSourceType.SALE, persisted.getId())).hasSize(1);
+        assertThat(cashMovementRepository.findByIdempotencyKey(
+            "SALE_PAYMENT:" + persisted.getId())).isPresent();
+        assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
+            .isEqualByComparingTo("4.0000");
+    }
+
+    @Test
+    void qrisRequiresExactPaymentAndHasNoPhysicalCashMovement() {
         ItemFixture item = insertCheckoutItem("QRIS", "10.0000", "5.0000");
+        assertThatThrownBy(() -> saleService.createSale(
+            "qris-no-session-" + UUID.randomUUID(),
+            checkoutRequest(PaymentType.QRIS, "10.0000", item.sku(), "1.0000")))
+            .isInstanceOf(CashSessionConflictException.class);
+
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
 
         assertThatThrownBy(() -> saleService.createSale(
             "qris-overpaid-" + UUID.randomUUID(),
@@ -487,6 +582,87 @@ class CashSessionPostgreSqlIntegrationTest {
             .isEqualByComparingTo("100.0000");
         assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
             .isEqualByComparingTo("4.0000");
+    }
+
+    @Test
+    void concurrentCheckoutsForLastStockCommitOnceAndReturnStockConflict() throws Exception {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        ItemFixture item = insertCheckoutItem("LAST-STOCK", "10.0000", "1.0000");
+        String firstKey = "last-stock-first-" + UUID.randomUUID();
+        String secondKey = "last-stock-second-" + UUID.randomUUID();
+        CreateSaleRequest request = checkoutRequest(
+            PaymentType.CASH, "10.0000", item.sku(), "1.0000");
+        SecurityContextHolder.clearContext();
+
+        List<Object> outcomes = race(
+            () -> saleService.createSale(firstKey, request),
+            () -> saleService.createSale(secondKey, request));
+
+        assertThat(outcomes).filteredOn(SaleResponse.class::isInstance).hasSize(1);
+        assertThat(outcomes).filteredOn(BusinessException.class::isInstance)
+            .singleElement()
+            .satisfies(outcome -> assertThat(((BusinessException) outcome).getErrorCode())
+                .isEqualTo(ErrorCode.SALE_INSUFFICIENT_STOCK_STORE));
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM sales WHERE checkout_idempotency_key IN (?, ?)",
+            Long.class, firstKey, secondKey)).isEqualTo(1L);
+        SaleResponse committed = (SaleResponse) outcomes.stream()
+            .filter(SaleResponse.class::isInstance)
+            .findFirst()
+            .orElseThrow();
+        var persisted = saleRepository.findByCode(committed.getCode()).orElseThrow();
+        assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
+            .isEqualByComparingTo("0.0000");
+        assertThat(stockMovementRepository.findByProductId(item.id())).hasSize(1);
+        assertThat(cashMovementRepository.findByIdempotencyKey(
+            "SALE_PAYMENT:" + persisted.getId())).isPresent();
+        assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
+            .isEqualByComparingTo("110.0000");
+    }
+
+    @Test
+    void checkoutRacingSessionCloseIsCommittedAndIncludedOrRejectedAsConflict()
+            throws Exception {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        ItemFixture item = insertCheckoutItem("SESSION-RACE", "10.0000", "5.0000");
+        String checkoutKey = "session-race-" + UUID.randomUUID();
+        CreateSaleRequest request = checkoutRequest(
+            PaymentType.CASH, "10.0000", item.sku(), "1.0000");
+        SecurityContextHolder.clearContext();
+
+        List<Object> outcomes = race(
+            () -> saleService.createSale(checkoutKey, request),
+            () -> cashSessionService.closeSession(sessionId, closeRequest("100.0000")));
+
+        assertThat(outcomes).anyMatch(CashSessionResponse.class::isInstance);
+        Object checkoutOutcome = outcomes.stream()
+            .filter(outcome -> !(outcome instanceof CashSessionResponse))
+            .findFirst()
+            .orElseThrow();
+        CashSessionResponse closed = cashSessionService.getSessionDetails(sessionId);
+        assertThat(closed.getStatus()).isEqualTo(CashSessionStatus.CLOSED);
+
+        if (checkoutOutcome instanceof SaleResponse) {
+            var sale = saleRepository.findByCheckoutIdempotencyKey(checkoutKey).orElseThrow();
+            assertThat(stockMovementRepository.findBySourceTypeAndSourceId(
+                MovementSourceType.SALE, sale.getId())).hasSize(1);
+            assertThat(cashMovementRepository.findByIdempotencyKey(
+                "SALE_PAYMENT:" + sale.getId())).isPresent();
+            assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
+                .isEqualByComparingTo("4.0000");
+            assertThat(closed.getExpectedClosingCash()).isEqualByComparingTo("110.0000");
+            assertThat(closed.getDifference()).isEqualByComparingTo("-10.0000");
+        } else {
+            assertThat(checkoutOutcome).isInstanceOf(CashSessionConflictException.class);
+            assertThat(saleRepository.findByCheckoutIdempotencyKey(checkoutKey)).isEmpty();
+            assertThat(stockMovementRepository.findByProductId(item.id())).isEmpty();
+            assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
+                .isEqualByComparingTo("5.0000");
+            assertThat(closed.getExpectedClosingCash()).isEqualByComparingTo("100.0000");
+            assertThat(closed.getDifference()).isEqualByComparingTo("0.0000");
+        }
     }
 
     @Test

@@ -8,6 +8,7 @@ import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
 import com.bloom.app.api.dto.request.sale.FilterSaleRequest;
 import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
+import com.bloom.app.api.dto.response.sale.SaleCheckoutStatusResponse;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.BusinessException;
@@ -165,6 +166,23 @@ public class SaleServiceImpl implements SaleService {
         }
 
         return saleMapper.saleToResponse(savedSale);
+    }
+
+    @Override
+    @Transactional
+    public SaleCheckoutStatusResponse getCheckoutStatus(String checkoutIdempotencyKey) {
+        String normalizedCheckoutKey = validateAndNormalizeCheckoutKey(checkoutIdempotencyKey);
+        saleRepository.lockCheckoutKey(normalizedCheckoutKey);
+
+        return saleRepository.findByCheckoutIdempotencyKey(normalizedCheckoutKey)
+            .map(sale -> SaleCheckoutStatusResponse.builder()
+                .status(SaleCheckoutStatusResponse.Status.COMPLETED)
+                .sale(saleMapper.saleToResponse(sale))
+                .build())
+            .orElseGet(() -> SaleCheckoutStatusResponse.builder()
+                .status(SaleCheckoutStatusResponse.Status.UNKNOWN)
+                .sale(null)
+                .build());
     }
 
     private void validateRequestShape(CreateSaleRequest request) {

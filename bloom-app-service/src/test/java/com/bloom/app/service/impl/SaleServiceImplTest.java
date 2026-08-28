@@ -2,6 +2,7 @@ package com.bloom.app.service.impl;
 
 import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
 import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
+import com.bloom.app.api.dto.response.sale.SaleCheckoutStatusResponse;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.domain.enums.DocumentType;
 import com.bloom.app.domain.enums.CashSessionStatus;
@@ -24,6 +25,7 @@ import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.mapper.SaleMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
+import org.mockito.InOrder;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -32,6 +34,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -63,6 +66,54 @@ class SaleServiceImplTest {
     void openCashSession() {
         when(cashSessionRepository.findFirstByStatusForUpdate(CashSessionStatus.OPEN))
             .thenReturn(Optional.of(CashSession.builder().id(7L).build()));
+    }
+
+    @Test
+    void checkoutStatusNormalizesLocksThenReturnsCompletedSale() {
+        Sale sale = Sale.builder().code("SALE-RECOVERED").build();
+        SaleResponse original = SaleResponse.builder().code("SALE-RECOVERED").build();
+        when(saleRepository.findByCheckoutIdempotencyKey("checkout-recovered"))
+            .thenReturn(Optional.of(sale));
+        when(saleMapper.saleToResponse(sale)).thenReturn(original);
+
+        SaleCheckoutStatusResponse response =
+            service.getCheckoutStatus("  checkout-recovered  ");
+
+        assertThat(response.getStatus())
+            .isEqualTo(SaleCheckoutStatusResponse.Status.COMPLETED);
+        assertThat(response.getSale()).isSameAs(original);
+        InOrder repositoryOrder = inOrder(saleRepository);
+        repositoryOrder.verify(saleRepository).lockCheckoutKey("checkout-recovered");
+        repositoryOrder.verify(saleRepository)
+            .findByCheckoutIdempotencyKey("checkout-recovered");
+        verifyNoInteractions(
+            itemRepository,
+            stockMovementService,
+            cashMovementService,
+            documentCounterService);
+    }
+
+    @Test
+    void checkoutStatusReturnsUnknownWithoutMutation() {
+        when(saleRepository.findByCheckoutIdempotencyKey("unused-checkout"))
+            .thenReturn(Optional.empty());
+
+        SaleCheckoutStatusResponse response =
+            service.getCheckoutStatus("unused-checkout");
+
+        assertThat(response.getStatus())
+            .isEqualTo(SaleCheckoutStatusResponse.Status.UNKNOWN);
+        assertThat(response.getSale()).isNull();
+        InOrder repositoryOrder = inOrder(saleRepository);
+        repositoryOrder.verify(saleRepository).lockCheckoutKey("unused-checkout");
+        repositoryOrder.verify(saleRepository)
+            .findByCheckoutIdempotencyKey("unused-checkout");
+        verifyNoInteractions(
+            itemRepository,
+            saleMapper,
+            stockMovementService,
+            cashMovementService,
+            documentCounterService);
     }
 
     @Test
