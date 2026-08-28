@@ -11,7 +11,7 @@ public interface SupplierPaymentMapper {
     @Mapping(source = "receipt.code", target = "receiptCode")
     @Mapping(source = "supplier.id", target = "supplierId")
     @Mapping(source = "supplier.code", target = "supplierCode")
-    @Mapping(source = "supplier.name", target = "supplierName")
+    @Mapping(source = "receipt.supplierNameSnapshot", target = "supplierName")
     @Mapping(source = "cashSession.id", target = "cashSessionId")
     SupplierPaymentResponse toResponse(SupplierPayment payment);
 }

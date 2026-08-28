@@ -1,6 +1,7 @@
 package com.bloom.app.service.util;
 
 import com.bloom.app.api.dto.response.goodsreceipt.GoodsReceiptResponse;
+import com.bloom.app.domain.enums.GoodsReceiptStatus;
 import com.bloom.app.domain.enums.SupplierPaymentStatus;
 import com.bloom.app.domain.model.GoodsReceipt;
 import com.bloom.app.persistence.projection.ReceiptPaymentTotal;
@@ -38,7 +39,9 @@ public class SupplierDebtCalculator {
     public GoodsReceiptResponse apply(
             GoodsReceiptResponse response, GoodsReceipt receipt, BigDecimal paidAmount) {
         BigDecimal normalizedPaid = money(paidAmount);
-        BigDecimal outstanding = money(receipt.getTotalAmount().subtract(normalizedPaid));
+        BigDecimal outstanding = receipt.getStatus() == GoodsReceiptStatus.CANCELLED
+            ? money(BigDecimal.ZERO)
+            : money(receipt.getTotalAmount().subtract(normalizedPaid));
         response.setPaidAmount(normalizedPaid);
         response.setOutstandingAmount(outstanding);
         response.setPaymentStatus(status(receipt.getTotalAmount(), normalizedPaid));

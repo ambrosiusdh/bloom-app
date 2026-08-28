@@ -63,13 +63,4 @@ public interface SupplierPaymentRepository extends JpaRepository<SupplierPayment
     List<ReceiptPaymentTotal> sumValidAmountsByReceiptIds(
         @Param("receiptIds") Collection<Long> receiptIds);
 
-    @Query("""
-        SELECT COALESCE(SUM(payment.amount), 0)
-        FROM SupplierPayment payment
-        WHERE payment.supplier.id = :supplierId
-          AND payment.receipt.status = com.bloom.app.domain.enums.GoodsReceiptStatus.POSTED
-          AND payment.voided = false
-        """)
-    BigDecimal sumValidAmountByPostedReceiptSupplierId(
-        @Param("supplierId") Long supplierId);
 }

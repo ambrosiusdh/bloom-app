@@ -18,15 +18,14 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Objects;
 
 @Getter
-@Setter
 @Builder
 @Entity
 @NoArgsConstructor
@@ -94,4 +93,24 @@ public class SupplierPayment {
 
     @Version
     private Long version;
+
+    public void voidWith(String reason, Instant at, String actor) {
+        if (voided) {
+            throw new IllegalStateException("Supplier payment is already voided");
+        }
+        String validatedReason = requireNonBlank(reason, "Void reason");
+        Instant validatedAt = Objects.requireNonNull(at, "Void timestamp is required");
+        String validatedActor = requireNonBlank(actor, "Void actor");
+        voided = true;
+        voidReason = validatedReason;
+        voidedAt = validatedAt;
+        voidedBy = validatedActor;
+    }
+
+    private String requireNonBlank(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(fieldName + " is required");
+        }
+        return value;
+    }
 }

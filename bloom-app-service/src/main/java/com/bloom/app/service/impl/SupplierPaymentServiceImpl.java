@@ -66,26 +66,15 @@ public class SupplierPaymentServiceImpl implements SupplierPaymentService {
             return supplierPaymentMapper.toResponse(existing);
         }
 
+        goodsReceiptRepository.findHeaderByCode(prepared.receiptCode())
+            .orElseThrow(() -> new ResourceNotFoundException(
+                "Goods receipt not found: " + prepared.receiptCode()));
+        CashSession cashSession = lockOpenCashSessionIfRequired(prepared);
         GoodsReceipt receipt = goodsReceiptRepository
             .findPaymentHeaderByCodeForUpdate(prepared.receiptCode())
             .orElseThrow(() -> new ResourceNotFoundException(
                 "Goods receipt not found: " + prepared.receiptCode()));
-        return persistAgainstLockedReceipt(receipt, prepared);
-    }
-
-    @Override
-    @Transactional
-    public SupplierPaymentResponse createInitialPayment(
-            GoodsReceipt receipt, String idempotencyKey, CreateSupplierPaymentRequest request) {
-        if (receipt == null || receipt.getId() == null || receipt.getCode() == null) {
-            throw new IllegalArgumentException("A persisted goods receipt is required");
-        }
-        PreparedPayment prepared = prepare(receipt.getCode(), idempotencyKey, request);
-        SupplierPayment existing = findIdempotentReplay(prepared);
-        if (existing != null) {
-            return supplierPaymentMapper.toResponse(existing);
-        }
-        return persistAgainstLockedReceipt(receipt, prepared);
+        return persistAgainstLockedReceipt(receipt, prepared, cashSession);
     }
 
     @Override
@@ -120,10 +109,11 @@ public class SupplierPaymentServiceImpl implements SupplierPaymentService {
             ));
         }
 
-        payment.setVoided(true);
-        payment.setVoidReason(reason);
-        payment.setVoidedAt(Instant.now().truncatedTo(ChronoUnit.MICROS));
-        payment.setVoidedBy(currentActorProvider.username());
+        payment.voidWith(
+            reason,
+            Instant.now().truncatedTo(ChronoUnit.MICROS),
+            currentActorProvider.username()
+        );
         return supplierPaymentMapper.toResponse(
             supplierPaymentRepository.saveAndFlush(payment));
     }
@@ -158,7 +148,7 @@ public class SupplierPaymentServiceImpl implements SupplierPaymentService {
     }
 
     private SupplierPaymentResponse persistAgainstLockedReceipt(
-            GoodsReceipt receipt, PreparedPayment prepared) {
+            GoodsReceipt receipt, PreparedPayment prepared, CashSession cashSession) {
         if (receipt.getStatus() != GoodsReceiptStatus.POSTED) {
             throw new SupplierPaymentConflictException(
                 "Only a posted goods receipt can accept supplier payments: " + receipt.getCode());
@@ -170,14 +160,6 @@ public class SupplierPaymentServiceImpl implements SupplierPaymentService {
             throw new SupplierPaymentConflictException(
                 "Supplier payment exceeds receipt outstanding amount of "
                     + supplierDebtCalculator.money(outstanding).toPlainString());
-        }
-
-        CashSession cashSession = null;
-        if (prepared.paymentMethod() == SupplierPaymentMethod.CASH) {
-            cashSession = cashSessionRepository
-                .findFirstByStatusForUpdate(CashSessionStatus.OPEN)
-                .orElseThrow(() -> new CashSessionConflictException(
-                    "An open cash session is required for a CASH supplier payment"));
         }
 
         SupplierPayment saved = supplierPaymentRepository.saveAndFlush(SupplierPayment.builder()
@@ -220,6 +202,9 @@ public class SupplierPaymentServiceImpl implements SupplierPaymentService {
         if (request.getPaidAt() == null) {
             throw new IllegalArgumentException("Paid at is required");
         }
+        if (request.getPaidAt().isAfter(Instant.now())) {
+            throw new IllegalArgumentException("Paid at must not be in the future");
+        }
         String reference = normalizeOptional(request.getReference(), "Payment reference");
         String note = normalizeOptional(request.getNote(), "Payment note");
         String requestHash = requestHash(
@@ -240,6 +225,21 @@ public class SupplierPaymentServiceImpl implements SupplierPaymentService {
             reference,
             note
         );
+    }
+
+    private CashSession lockOpenCashSessionIfRequired(PreparedPayment prepared) {
+        if (prepared.paymentMethod() != SupplierPaymentMethod.CASH) {
+            return null;
+        }
+        CashSession session = cashSessionRepository
+            .findFirstByStatusForUpdate(CashSessionStatus.OPEN)
+            .orElseThrow(() -> new CashSessionConflictException(
+                "An open cash session is required for a CASH supplier payment"));
+        if (prepared.paidAt().isBefore(session.getOpenedAt())) {
+            throw new CashSessionConflictException(
+                "A CASH supplier payment cannot predate its open cash session");
+        }
+        return session;
     }
 
     private String requestHash(

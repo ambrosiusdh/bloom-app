@@ -52,7 +52,7 @@ class SupplierPaymentControllerTest {
                     {
                       "amount": 25.0000,
                       "paymentMethod": "BANK_TRANSFER",
-                      "paidAt": "2026-08-27T08:00:00Z",
+                      "paidAt": "2026-08-26T08:00:00Z",
                       "reference": "TRX-001",
                       "note": "First installment"
                     }
@@ -69,7 +69,7 @@ class SupplierPaymentControllerTest {
             {
               "amount": 25.0000,
               "paymentMethod": "CASH",
-              "paidAt": "2026-08-27T08:00:00Z"
+              "paidAt": "2026-08-26T08:00:00Z"
             }
             """;
         mockMvc.perform(post("/api/goods-receipts/GR-001/payments")
@@ -84,7 +84,7 @@ class SupplierPaymentControllerTest {
                     {
                       "amount": 25.0000,
                       "paymentMethod": "CARD",
-                      "paidAt": "2026-08-27T08:00:00Z"
+                      "paidAt": "2026-08-26T08:00:00Z"
                     }
                     """))
             .andExpect(status().isBadRequest());

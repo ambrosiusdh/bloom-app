@@ -16,6 +16,6 @@ public class SupplierOutstandingBalanceResponse {
     private String supplierCode;
     private String supplierName;
     private BigDecimal totalPostedAmount;
-    private BigDecimal validPayments;
+    private BigDecimal paidAmount;
     private BigDecimal outstandingAmount;
 }

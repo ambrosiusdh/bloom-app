@@ -111,14 +111,14 @@ class SupplierControllerTest {
                 .supplierCode("SUP-001")
                 .supplierName("Bloom Textile")
                 .totalPostedAmount(new BigDecimal("100.0000"))
-                .validPayments(new BigDecimal("40.0000"))
+                .paidAmount(new BigDecimal("40.0000"))
                 .outstandingAmount(new BigDecimal("60.0000"))
                 .build());
 
         mockMvc.perform(get("/api/suppliers/SUP-001/outstanding-balance"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.totalPostedAmount").value(100.0))
-            .andExpect(jsonPath("$.data.validPayments").value(40.0))
+            .andExpect(jsonPath("$.data.paidAmount").value(40.0))
             .andExpect(jsonPath("$.data.outstandingAmount").value(60.0));
     }
 

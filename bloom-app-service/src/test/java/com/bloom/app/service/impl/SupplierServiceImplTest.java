@@ -6,15 +6,16 @@ import com.bloom.app.api.dto.request.supplier.UpdateSupplierRequest;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.model.Supplier;
+import com.bloom.app.persistence.projection.SupplierBalanceTotals;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
 import com.bloom.app.persistence.repository.SupplierRepository;
-import com.bloom.app.persistence.repository.SupplierPaymentRepository;
 import com.bloom.app.service.mapper.SupplierMapper;
 import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -31,13 +32,10 @@ class SupplierServiceImplTest {
     private final SupplierRepository supplierRepository = mock(SupplierRepository.class);
     private final GoodsReceiptRepository goodsReceiptRepository = mock(GoodsReceiptRepository.class);
     private final SupplierMapper supplierMapper = Mappers.getMapper(SupplierMapper.class);
-    private final SupplierPaymentRepository supplierPaymentRepository =
-        mock(SupplierPaymentRepository.class);
     private final SupplierServiceImpl service = new SupplierServiceImpl(
         supplierRepository,
         goodsReceiptRepository,
-        supplierMapper,
-        supplierPaymentRepository
+        supplierMapper
     );
 
     @Test
@@ -164,6 +162,23 @@ class SupplierServiceImplTest {
             assertThat(response.getCode()).isEqualTo("SUP-001");
             assertThat(response.isActive()).isTrue();
         });
+    }
+
+    @Test
+    void outstandingBalanceUsesOneRepositorySnapshotAndClearApiNames() {
+        Supplier supplier = supplier(10L, "SUP-001", true);
+        SupplierBalanceTotals totals = mock(SupplierBalanceTotals.class);
+        when(supplierRepository.findByCode("SUP-001")).thenReturn(Optional.of(supplier));
+        when(goodsReceiptRepository.calculateSupplierBalance(10L)).thenReturn(totals);
+        when(totals.getTotalPostedAmount()).thenReturn(new BigDecimal("100.0000"));
+        when(totals.getPaidAmount()).thenReturn(new BigDecimal("40.0000"));
+
+        var response = service.getOutstandingBalance("SUP-001");
+
+        assertThat(response.getTotalPostedAmount()).isEqualByComparingTo("100.0000");
+        assertThat(response.getPaidAmount()).isEqualByComparingTo("40.0000");
+        assertThat(response.getOutstandingAmount()).isEqualByComparingTo("60.0000");
+        verify(goodsReceiptRepository).calculateSupplierBalance(10L);
     }
 
     private Supplier supplier(Long id, String code, boolean active) {

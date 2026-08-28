@@ -8,9 +8,9 @@ import com.bloom.app.api.dto.response.supplier.SupplierOutstandingBalanceRespons
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.model.Supplier;
+import com.bloom.app.persistence.projection.SupplierBalanceTotals;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
 import com.bloom.app.persistence.repository.SupplierRepository;
-import com.bloom.app.persistence.repository.SupplierPaymentRepository;
 import com.bloom.app.service.SupplierService;
 import com.bloom.app.service.mapper.SupplierMapper;
 import com.bloom.app.service.specification.SupplierSpecification;
@@ -32,7 +32,6 @@ public class SupplierServiceImpl implements SupplierService {
     private final SupplierRepository supplierRepository;
     private final GoodsReceiptRepository goodsReceiptRepository;
     private final SupplierMapper supplierMapper;
-    private final SupplierPaymentRepository supplierPaymentRepository;
 
     @Override
     @Transactional
@@ -74,18 +73,18 @@ public class SupplierServiceImpl implements SupplierService {
     @Transactional(readOnly = true)
     public SupplierOutstandingBalanceResponse getOutstandingBalance(String code) {
         Supplier supplier = findSupplier(code);
-        BigDecimal totalPosted = normalizedMoney(
-            goodsReceiptRepository.sumPostedTotalBySupplierId(supplier.getId()));
-        BigDecimal validPayments = normalizedMoney(
-            supplierPaymentRepository.sumValidAmountByPostedReceiptSupplierId(supplier.getId()));
+        SupplierBalanceTotals totals = goodsReceiptRepository
+            .calculateSupplierBalance(supplier.getId());
+        BigDecimal totalPosted = normalizedMoney(totals.getTotalPostedAmount());
+        BigDecimal paidAmount = normalizedMoney(totals.getPaidAmount());
         return SupplierOutstandingBalanceResponse.builder()
             .supplierId(supplier.getId())
             .supplierCode(supplier.getCode())
             .supplierName(supplier.getName())
             .totalPostedAmount(totalPosted)
-            .validPayments(validPayments)
+            .paidAmount(paidAmount)
             .outstandingAmount(CashMoneyUtil.reconciliationBoundary(
-                totalPosted.subtract(validPayments)))
+                totalPosted.subtract(paidAmount)))
             .build();
     }
 

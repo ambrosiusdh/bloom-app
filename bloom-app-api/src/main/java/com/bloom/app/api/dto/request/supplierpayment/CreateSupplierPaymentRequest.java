@@ -4,6 +4,7 @@ import com.bloom.app.domain.enums.SupplierPaymentMethod;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PastOrPresent;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -27,6 +28,7 @@ public class CreateSupplierPaymentRequest {
     private SupplierPaymentMethod paymentMethod;
 
     @NotNull(message = "Paid at is required")
+    @PastOrPresent(message = "Paid at must not be in the future")
     private Instant paidAt;
 
     @Size(max = 255, message = "Payment reference must not exceed 255 characters")

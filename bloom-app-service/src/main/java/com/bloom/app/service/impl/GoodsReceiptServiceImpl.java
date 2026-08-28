@@ -7,9 +7,12 @@ import com.bloom.app.api.dto.request.goodsreceipt.FilterGoodsReceiptRequest;
 import com.bloom.app.api.dto.request.supplierpayment.CreateSupplierPaymentRequest;
 import com.bloom.app.api.dto.response.goodsreceipt.GoodsReceiptResponse;
 import com.bloom.app.domain.enums.DocumentType;
+import com.bloom.app.domain.enums.CashSessionStatus;
 import com.bloom.app.domain.enums.GoodsReceiptStatus;
+import com.bloom.app.domain.enums.SupplierPaymentMethod;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.BusinessException;
+import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.GoodsReceiptConflictException;
 import com.bloom.app.domain.exception.GoodsReceiptIdempotencyConflictException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
@@ -19,6 +22,7 @@ import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Supplier;
 import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
+import com.bloom.app.persistence.repository.CashSessionRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.SupplierRepository;
 import com.bloom.app.service.DocumentCounterService;
@@ -64,6 +68,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     private static final int MAX_RECEIPT_CODE_LENGTH = 100;
 
     private final GoodsReceiptRepository goodsReceiptRepository;
+    private final CashSessionRepository cashSessionRepository;
     private final ItemRepository itemRepository;
     private final StockMovementService stockMovementService;
     private final DocumentCounterService documentCounterService;
@@ -91,6 +96,8 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             }
             return mapResponse(existing);
         }
+
+        lockCashSessionForInitialPayment(request.getInitialPayment());
 
         String supplierCode = SupplierMapper.normalizeCode(request.getSupplierCode());
         Supplier supplier = supplierRepository.findByCodeForUpdate(supplierCode)
@@ -159,8 +166,8 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         GoodsReceipt savedReceipt = goodsReceiptRepository.saveAndFlush(receipt);
         stockMovementService.recordGoodsReceiptPosting(savedReceipt);
         if (request.getInitialPayment() != null) {
-            supplierPaymentService.createInitialPayment(
-                savedReceipt,
+            supplierPaymentService.createPayment(
+                savedReceipt.getCode(),
                 initialPaymentIdempotencyKey(normalizedKey),
                 request.getInitialPayment()
             );
@@ -343,6 +350,15 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         if (payment.getPaidAt() == null) {
             throw new IllegalArgumentException("Paid at is required");
         }
+    }
+
+    private void lockCashSessionForInitialPayment(CreateSupplierPaymentRequest payment) {
+        if (payment == null || payment.getPaymentMethod() != SupplierPaymentMethod.CASH) {
+            return;
+        }
+        cashSessionRepository.findFirstByStatusForUpdate(CashSessionStatus.OPEN)
+            .orElseThrow(() -> new CashSessionConflictException(
+                "An open cash session is required for a CASH supplier payment"));
     }
 
     private void updateInitialPaymentHash(
