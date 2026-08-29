@@ -7,6 +7,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 public interface SupplierPaymentService {
+    void lockIdempotencyKey(String idempotencyKey);
+
     SupplierPaymentResponse createPayment(
         String receiptCode, String idempotencyKey, CreateSupplierPaymentRequest request);
 

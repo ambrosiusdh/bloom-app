@@ -60,7 +60,7 @@ public interface GoodsReceiptRepository extends JpaRepository<GoodsReceipt, Long
                 FROM supplier_payments payment
                 JOIN goods_receipts receipt
                   ON receipt.id = payment.goods_receipt_id
-                WHERE receipt.supplier_id = :supplierId
+                WHERE payment.supplier_id = :supplierId
                   AND receipt.status = 'POSTED'
                   AND payment.is_voided = FALSE
             ) AS "paidAmount"

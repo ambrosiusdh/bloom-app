@@ -50,10 +50,17 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
+import javax.sql.DataSource;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -104,6 +111,9 @@ class SupplierPaymentPostgreSqlIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private DataSource dataSource;
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -496,6 +506,13 @@ class SupplierPaymentPostgreSqlIntegrationTest {
             receipt.getId(), supplier.getId(), "90.0001", key("direct-overpay")))
             .isInstanceOf(DataAccessException.class)
             .hasMessageContaining("would overpay");
+        assertThatThrownBy(() -> insertDirectFuturePayment(
+            receipt.getId(),
+            supplier.getId(),
+            "1.0000",
+            key("future-paid-at")))
+            .isInstanceOf(DataAccessException.class)
+            .hasMessageContaining("paid_at cannot be in the future");
         assertThatThrownBy(() -> jdbcTemplate.update(
             "UPDATE supplier_payments SET reference = ? WHERE id = ?",
             "edited", payment.getId()))
@@ -578,6 +595,65 @@ class SupplierPaymentPostgreSqlIntegrationTest {
             .isEqualByComparingTo("1000.0000");
     }
 
+    @Test
+    void initialAndStandaloneCashPaymentsUseCompatibleIdempotencyLockOrder() throws Exception {
+        Supplier supplier = supplier();
+        GoodsReceiptResponse standaloneReceipt = receipt(supplier, null);
+        Item blockedItem = item();
+        var session = cashSessionService.openSession(OpenCashSessionRequest.builder()
+            .openingCash(new BigDecimal("1000.0000"))
+            .build());
+        String receiptKey = key("initial-advisory-order");
+        String sharedPaymentKey = initialPaymentIdempotencyKey(receiptKey);
+        CreateGoodsReceiptRequest initialReceipt = CreateGoodsReceiptRequest.builder()
+            .receivedDate(Instant.now())
+            .supplierCode(supplier.getCode())
+            .initialPayment(payment("100.0000", SupplierPaymentMethod.CASH))
+            .items(List.of(CreateGoodsReceiptItemRequest.builder()
+                .itemSku(blockedItem.getSku())
+                .quantity(new BigDecimal("1.0000"))
+                .purchasePrice(new BigDecimal("100.0000"))
+                .stockLocation(StockLocation.STORE)
+                .build()))
+            .build();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try (Connection blocker = dataSource.getConnection()) {
+            blocker.setAutoCommit(false);
+            try (PreparedStatement statement = blocker.prepareStatement(
+                    "SELECT id FROM items WHERE id = ? FOR UPDATE")) {
+                statement.setLong(1, blockedItem.getId());
+                statement.executeQuery().close();
+            }
+
+            Future<Object> receiptFuture = executor.submit(() -> runOperation(() ->
+                goodsReceiptService.createGoodsReceipt(receiptKey, initialReceipt)));
+            assertThat(waitForLockWaiters(1)).isTrue();
+
+            Future<Object> paymentFuture = executor.submit(() -> runOperation(() ->
+                supplierPaymentService.createPayment(
+                    standaloneReceipt.getCode(),
+                    sharedPaymentKey,
+                    payment("10.0000", SupplierPaymentMethod.CASH))));
+            assertThat(waitForLockWaiters(2)).isTrue();
+
+            blocker.rollback();
+            assertThat(receiptFuture.get(20, TimeUnit.SECONDS))
+                .isInstanceOf(GoodsReceiptResponse.class);
+            assertThat(paymentFuture.get(20, TimeUnit.SECONDS))
+                .isInstanceOf(SupplierPaymentIdempotencyConflictException.class);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM supplier_payments WHERE idempotency_key = ?",
+            Long.class,
+            sharedPaymentKey)).isEqualTo(1L);
+        assertThat(cashSessionService.calculateExpectedCash(session.getId()).getExpectedClosingCash())
+            .isEqualByComparingTo("900.0000");
+    }
+
     private List<Object> runConcurrentPayments(
             String receiptCode,
             String idempotencyKey,
@@ -621,6 +697,37 @@ class SupplierPaymentPostgreSqlIntegrationTest {
         }
     }
 
+    private Object runOperation(Callable<Object> operation) {
+        setAuthentication();
+        try {
+            return operation.call();
+        } catch (Exception exception) {
+            return exception;
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    private boolean waitForLockWaiters(int expectedWaiters) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            Long waiters = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND pid <> pg_backend_pid()
+                  AND wait_event_type = 'Lock'
+                """,
+                Long.class);
+            if (waiters != null && waiters >= expectedWaiters) {
+                return true;
+            }
+            Thread.sleep(10);
+        }
+        return false;
+    }
+
     private void assertPostingRolledBack(String receiptKey, String itemSku) {
         assertThat(jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM goods_receipts WHERE create_idempotency_key = ?",
@@ -643,22 +750,41 @@ class SupplierPaymentPostgreSqlIntegrationTest {
 
     private void insertDirectPayment(
             Long receiptId, Long supplierId, String amount, String idempotencyKey) {
-        Instant now = Instant.now();
+        insertDirectPaymentWithDatabaseTime(
+            receiptId, supplierId, amount, idempotencyKey, false);
+    }
+
+    private void insertDirectFuturePayment(
+            Long receiptId,
+            Long supplierId,
+            String amount,
+            String idempotencyKey) {
+        insertDirectPaymentWithDatabaseTime(
+            receiptId, supplierId, amount, idempotencyKey, true);
+    }
+
+    private void insertDirectPaymentWithDatabaseTime(
+            Long receiptId,
+            Long supplierId,
+            String amount,
+            String idempotencyKey,
+            boolean futurePaidAt) {
+        String paidAtExpression = futurePaidAt
+            ? "clock_timestamp()::timestamp + INTERVAL '1 hour'"
+            : "clock_timestamp()::timestamp";
         jdbcTemplate.update(
             """
             INSERT INTO supplier_payments (
                 goods_receipt_id, supplier_id, cash_session_id, amount,
                 payment_method, paid_at, reference, note, actor, is_voided,
                 idempotency_key, request_hash, created_at, version
-            ) VALUES (?, ?, NULL, ?, 'BANK_TRANSFER', ?, NULL, NULL, 'admin', FALSE,
-                      ?, REPEAT('a', 64), ?, 0)
-            """,
+            ) VALUES (?, ?, NULL, ?, 'BANK_TRANSFER', %s, NULL, NULL, 'admin', FALSE,
+                      ?, REPEAT('a', 64), clock_timestamp()::timestamp, 0)
+            """.formatted(paidAtExpression),
             receiptId,
             supplierId,
             new BigDecimal(amount),
-            Timestamp.from(now),
-            idempotencyKey,
-            Timestamp.from(now)
+            idempotencyKey
         );
     }
 
@@ -735,6 +861,17 @@ class SupplierPaymentPostgreSqlIntegrationTest {
 
     private String key(String purpose) {
         return purpose + "-" + UUID.randomUUID();
+    }
+
+    private String initialPaymentIdempotencyKey(String receiptIdempotencyKey) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(
+                receiptIdempotencyKey.getBytes(StandardCharsets.UTF_8));
+            return "RECEIPT-INITIAL:" + HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is not available", exception);
+        }
     }
 
     private static void setAuthentication() {

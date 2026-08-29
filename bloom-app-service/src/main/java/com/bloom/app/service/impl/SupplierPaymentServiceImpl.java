@@ -30,6 +30,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -55,6 +56,13 @@ public class SupplierPaymentServiceImpl implements SupplierPaymentService {
     private final SupplierPaymentMapper supplierPaymentMapper;
     private final SupplierDebtCalculator supplierDebtCalculator;
     private final CurrentActorProvider currentActorProvider;
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void lockIdempotencyKey(String idempotencyKey) {
+        supplierPaymentRepository.lockIdempotencyKey(
+            normalizeIdempotencyKey(idempotencyKey));
+    }
 
     @Override
     @Transactional
@@ -137,7 +145,7 @@ public class SupplierPaymentServiceImpl implements SupplierPaymentService {
     }
 
     private SupplierPayment findIdempotentReplay(PreparedPayment prepared) {
-        supplierPaymentRepository.lockIdempotencyKey(prepared.idempotencyKey());
+        lockIdempotencyKey(prepared.idempotencyKey());
         SupplierPayment existing = supplierPaymentRepository
             .findByIdempotencyKey(prepared.idempotencyKey())
             .orElse(null);

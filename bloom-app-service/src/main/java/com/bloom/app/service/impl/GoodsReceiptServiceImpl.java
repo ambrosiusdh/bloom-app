@@ -97,6 +97,11 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             return mapResponse(existing);
         }
 
+        String initialPaymentKey = initialPaymentIdempotencyKey(
+            normalizedKey, request.getInitialPayment());
+        if (initialPaymentKey != null) {
+            supplierPaymentService.lockIdempotencyKey(initialPaymentKey);
+        }
         lockCashSessionForInitialPayment(request.getInitialPayment());
 
         String supplierCode = SupplierMapper.normalizeCode(request.getSupplierCode());
@@ -168,7 +173,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         if (request.getInitialPayment() != null) {
             supplierPaymentService.createPayment(
                 savedReceipt.getCode(),
-                initialPaymentIdempotencyKey(normalizedKey),
+                initialPaymentKey,
                 request.getInitialPayment()
             );
         }
@@ -374,7 +379,11 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         updateHashField(digest, canonicalOptional(payment.getNote()));
     }
 
-    private String initialPaymentIdempotencyKey(String receiptIdempotencyKey) {
+    private String initialPaymentIdempotencyKey(
+            String receiptIdempotencyKey, CreateSupplierPaymentRequest initialPayment) {
+        if (initialPayment == null) {
+            return null;
+        }
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(receiptIdempotencyKey.getBytes(StandardCharsets.UTF_8));
