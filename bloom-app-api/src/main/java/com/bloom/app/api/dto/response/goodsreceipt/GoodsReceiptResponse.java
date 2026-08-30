@@ -1,6 +1,7 @@
 package com.bloom.app.api.dto.response.goodsreceipt;
 
 import com.bloom.app.domain.enums.GoodsReceiptStatus;
+import com.bloom.app.domain.enums.SupplierPaymentStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -23,6 +24,9 @@ public class GoodsReceiptResponse {
     private String supplierCode;
     private String supplierName;
     private BigDecimal totalAmount;
+    private BigDecimal paidAmount;
+    private BigDecimal outstandingAmount;
+    private SupplierPaymentStatus paymentStatus;
     private GoodsReceiptStatus status;
     private String description;
     private Instant cancelledAt;

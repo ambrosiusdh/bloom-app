@@ -4,6 +4,7 @@ import com.bloom.app.api.dto.request.supplier.CreateSupplierRequest;
 import com.bloom.app.api.dto.request.supplier.FilterSupplierRequest;
 import com.bloom.app.api.dto.request.supplier.UpdateSupplierRequest;
 import com.bloom.app.api.dto.response.supplier.SupplierResponse;
+import com.bloom.app.api.dto.response.supplier.SupplierOutstandingBalanceResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -15,6 +16,8 @@ public interface SupplierService {
     Page<SupplierResponse> filterSuppliers(FilterSupplierRequest request, Pageable pageable);
 
     SupplierResponse getSupplierDetails(String code);
+
+    SupplierOutstandingBalanceResponse getOutstandingBalance(String code);
 
     SupplierResponse setSupplierActive(String code, boolean active);
 

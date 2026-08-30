@@ -4,14 +4,17 @@ import com.bloom.app.api.dto.request.supplier.CreateSupplierRequest;
 import com.bloom.app.api.dto.request.supplier.FilterSupplierRequest;
 import com.bloom.app.api.dto.request.supplier.UpdateSupplierRequest;
 import com.bloom.app.api.dto.response.supplier.SupplierResponse;
+import com.bloom.app.api.dto.response.supplier.SupplierOutstandingBalanceResponse;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.model.Supplier;
+import com.bloom.app.persistence.projection.SupplierBalanceTotals;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
 import com.bloom.app.persistence.repository.SupplierRepository;
 import com.bloom.app.service.SupplierService;
 import com.bloom.app.service.mapper.SupplierMapper;
 import com.bloom.app.service.specification.SupplierSpecification;
+import com.bloom.app.service.util.CashMoneyUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -19,6 +22,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
 
 @Slf4j
 @Service
@@ -62,6 +67,30 @@ public class SupplierServiceImpl implements SupplierService {
     @Transactional(readOnly = true)
     public SupplierResponse getSupplierDetails(String code) {
         return supplierMapper.entityToResponse(findSupplier(code));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SupplierOutstandingBalanceResponse getOutstandingBalance(String code) {
+        Supplier supplier = findSupplier(code);
+        SupplierBalanceTotals totals = goodsReceiptRepository
+            .calculateSupplierBalance(supplier.getId());
+        BigDecimal totalPosted = normalizedMoney(totals.getTotalPostedAmount());
+        BigDecimal paidAmount = normalizedMoney(totals.getPaidAmount());
+        return SupplierOutstandingBalanceResponse.builder()
+            .supplierId(supplier.getId())
+            .supplierCode(supplier.getCode())
+            .supplierName(supplier.getName())
+            .totalPostedAmount(totalPosted)
+            .paidAmount(paidAmount)
+            .outstandingAmount(CashMoneyUtil.reconciliationBoundary(
+                totalPosted.subtract(paidAmount)))
+            .build();
+    }
+
+    private BigDecimal normalizedMoney(BigDecimal value) {
+        return CashMoneyUtil.reconciliationBoundary(
+            value == null ? BigDecimal.ZERO : value);
     }
 
     @Override

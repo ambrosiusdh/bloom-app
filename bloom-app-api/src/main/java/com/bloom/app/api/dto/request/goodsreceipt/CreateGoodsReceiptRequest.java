@@ -1,5 +1,6 @@
 package com.bloom.app.api.dto.request.goodsreceipt;
 
+import com.bloom.app.api.dto.request.supplierpayment.CreateSupplierPaymentRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotBlank;
@@ -25,6 +26,9 @@ public class CreateGoodsReceiptRequest {
     private String supplierCode;
     
     private String description;
+
+    @Valid
+    private CreateSupplierPaymentRequest initialPayment;
 
     @NotEmpty(message = "Items cannot be empty")
     @Valid

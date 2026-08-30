@@ -4,11 +4,15 @@ import com.bloom.app.api.dto.request.goodsreceipt.CancelGoodsReceiptRequest;
 import com.bloom.app.api.dto.request.goodsreceipt.CreateGoodsReceiptItemRequest;
 import com.bloom.app.api.dto.request.goodsreceipt.CreateGoodsReceiptRequest;
 import com.bloom.app.api.dto.request.goodsreceipt.FilterGoodsReceiptRequest;
+import com.bloom.app.api.dto.request.supplierpayment.CreateSupplierPaymentRequest;
 import com.bloom.app.api.dto.response.goodsreceipt.GoodsReceiptResponse;
 import com.bloom.app.domain.enums.DocumentType;
+import com.bloom.app.domain.enums.CashSessionStatus;
 import com.bloom.app.domain.enums.GoodsReceiptStatus;
+import com.bloom.app.domain.enums.SupplierPaymentMethod;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.BusinessException;
+import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.GoodsReceiptConflictException;
 import com.bloom.app.domain.exception.GoodsReceiptIdempotencyConflictException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
@@ -18,16 +22,19 @@ import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Supplier;
 import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
+import com.bloom.app.persistence.repository.CashSessionRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.SupplierRepository;
 import com.bloom.app.service.DocumentCounterService;
 import com.bloom.app.service.GoodsReceiptService;
 import com.bloom.app.service.StockMovementService;
+import com.bloom.app.service.SupplierPaymentService;
 import com.bloom.app.service.mapper.GoodsReceiptMapper;
 import com.bloom.app.service.mapper.SupplierMapper;
 import com.bloom.app.service.specification.GoodsReceiptSpecification;
 import com.bloom.app.service.util.CashMoneyUtil;
 import com.bloom.app.service.util.CurrentActorProvider;
+import com.bloom.app.service.util.SupplierDebtCalculator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -61,12 +68,15 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     private static final int MAX_RECEIPT_CODE_LENGTH = 100;
 
     private final GoodsReceiptRepository goodsReceiptRepository;
+    private final CashSessionRepository cashSessionRepository;
     private final ItemRepository itemRepository;
     private final StockMovementService stockMovementService;
     private final DocumentCounterService documentCounterService;
     private final GoodsReceiptMapper goodsReceiptMapper;
     private final SupplierRepository supplierRepository;
     private final CurrentActorProvider currentActorProvider;
+    private final SupplierPaymentService supplierPaymentService;
+    private final SupplierDebtCalculator supplierDebtCalculator;
 
     @Override
     @Transactional
@@ -84,8 +94,15 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             if (!existing.getCreateRequestHash().equals(requestHash)) {
                 throw new GoodsReceiptIdempotencyConflictException();
             }
-            return goodsReceiptMapper.toResponse(existing);
+            return mapResponse(existing);
         }
+
+        String initialPaymentKey = initialPaymentIdempotencyKey(
+            normalizedKey, request.getInitialPayment());
+        if (initialPaymentKey != null) {
+            supplierPaymentService.lockIdempotencyKey(initialPaymentKey);
+        }
+        lockCashSessionForInitialPayment(request.getInitialPayment());
 
         String supplierCode = SupplierMapper.normalizeCode(request.getSupplierCode());
         Supplier supplier = supplierRepository.findByCodeForUpdate(supplierCode)
@@ -117,7 +134,6 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             .supplierNameSnapshot(supplier.getName())
             .createIdempotencyKey(normalizedKey)
             .createRequestHash(requestHash)
-            .paidAmount(BigDecimal.ZERO.setScale(CashMoneyUtil.SCALE))
             .status(GoodsReceiptStatus.POSTED)
             .description(normalizeOptional(request.getDescription()))
             .build();
@@ -154,9 +170,16 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             "Goods receipt total"));
         GoodsReceipt savedReceipt = goodsReceiptRepository.saveAndFlush(receipt);
         stockMovementService.recordGoodsReceiptPosting(savedReceipt);
+        if (request.getInitialPayment() != null) {
+            supplierPaymentService.createPayment(
+                savedReceipt.getCode(),
+                initialPaymentKey,
+                request.getInitialPayment()
+            );
+        }
 
         log.debug("Created and posted goods receipt {}", savedReceipt.getCode());
-        return goodsReceiptMapper.toResponse(savedReceipt);
+        return mapResponse(savedReceipt);
     }
 
     @Override
@@ -173,14 +196,13 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                 ErrorCode.GOODS_RECEIPT_NOT_FOUND.formatMessage(normalizedCode)));
 
         if (receipt.getStatus() == GoodsReceiptStatus.CANCELLED) {
-            return goodsReceiptMapper.toResponse(receipt);
+            return mapResponse(receipt);
         }
         if (receipt.getStatus() != GoodsReceiptStatus.POSTED) {
             throw new GoodsReceiptConflictException(
                 "Only a posted goods receipt can be cancelled: " + normalizedCode);
         }
-        if (receipt.getPaidAmount() != null
-                && receipt.getPaidAmount().compareTo(BigDecimal.ZERO) > 0) {
+        if (supplierDebtCalculator.validPaidAmount(receipt.getId()).signum() > 0) {
             throw new GoodsReceiptConflictException(
                 "Goods receipt cannot be cancelled while it has active payments: "
                     + normalizedCode);
@@ -205,7 +227,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         receipt.setCancelledAt(Instant.now().truncatedTo(ChronoUnit.MICROS));
         receipt.setCancelledBy(currentActorProvider.username());
         GoodsReceipt savedReceipt = goodsReceiptRepository.saveAndFlush(receipt);
-        return goodsReceiptMapper.toResponse(savedReceipt);
+        return mapResponse(savedReceipt);
     }
 
     @Override
@@ -215,7 +237,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         GoodsReceipt goodsReceipt = goodsReceiptRepository.findDetailsByCode(normalizedCode)
             .orElseThrow(() -> new ResourceNotFoundException(
                 ErrorCode.GOODS_RECEIPT_NOT_FOUND.formatMessage(normalizedCode)));
-        return goodsReceiptMapper.toResponse(goodsReceipt);
+        return mapResponse(goodsReceipt);
     }
 
     @Override
@@ -226,8 +248,11 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             ? new FilterGoodsReceiptRequest() : request;
         Specification<GoodsReceipt> spec = GoodsReceiptSpecification.filter(effectiveRequest);
         Page<GoodsReceipt> page = goodsReceiptRepository.findAll(spec, pageable);
+        Map<Long, BigDecimal> paidByReceipt = supplierDebtCalculator.validPaidAmounts(
+            page.getContent().stream().map(GoodsReceipt::getId).toList());
         List<GoodsReceiptResponse> responses = page.getContent().stream()
-            .map(goodsReceiptMapper::toResponse)
+            .map(receipt -> mapResponse(
+                receipt, paidByReceipt.getOrDefault(receipt.getId(), BigDecimal.ZERO)))
             .collect(Collectors.toList());
         return new PageImpl<>(responses, pageable, page.getTotalElements());
     }
@@ -258,6 +283,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             InventoryQuantityValidator.validateIncoming(line.getQuantity(), true);
             CashMoneyUtil.requirePositive(line.getPurchasePrice(), "Purchase price");
         }
+        validateInitialPayment(request.getInitialPayment());
     }
 
     private String normalizeIdempotencyKey(String key) {
@@ -278,6 +304,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             updateHashField(digest, SupplierMapper.normalizeCode(request.getSupplierCode()));
             updateHashField(digest, request.getReceivedDate().toString());
             updateHashField(digest, canonicalOptional(request.getDescription()));
+            updateInitialPaymentHash(digest, request.getInitialPayment());
             List<CreateGoodsReceiptItemRequest> sortedLines = request.getItems().stream()
                 .sorted(Comparator
                     .comparing((CreateGoodsReceiptItemRequest line) -> line.getItemSku().trim())
@@ -315,6 +342,64 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
 
     private String normalizeOptional(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private void validateInitialPayment(CreateSupplierPaymentRequest payment) {
+        if (payment == null) {
+            return;
+        }
+        CashMoneyUtil.requirePositive(payment.getAmount(), "Supplier payment amount");
+        if (payment.getPaymentMethod() == null) {
+            throw new IllegalArgumentException("Payment method is required");
+        }
+        if (payment.getPaidAt() == null) {
+            throw new IllegalArgumentException("Paid at is required");
+        }
+    }
+
+    private void lockCashSessionForInitialPayment(CreateSupplierPaymentRequest payment) {
+        if (payment == null || payment.getPaymentMethod() != SupplierPaymentMethod.CASH) {
+            return;
+        }
+        cashSessionRepository.findFirstByStatusForUpdate(CashSessionStatus.OPEN)
+            .orElseThrow(() -> new CashSessionConflictException(
+                "An open cash session is required for a CASH supplier payment"));
+    }
+
+    private void updateInitialPaymentHash(
+            MessageDigest digest, CreateSupplierPaymentRequest payment) {
+        updateHashField(digest, payment == null ? "NO_INITIAL_PAYMENT" : "INITIAL_PAYMENT");
+        if (payment == null) {
+            return;
+        }
+        updateHashField(digest, canonicalDecimal(payment.getAmount()));
+        updateHashField(digest, payment.getPaymentMethod().name());
+        updateHashField(digest, payment.getPaidAt().toString());
+        updateHashField(digest, canonicalOptional(payment.getReference()));
+        updateHashField(digest, canonicalOptional(payment.getNote()));
+    }
+
+    private String initialPaymentIdempotencyKey(
+            String receiptIdempotencyKey, CreateSupplierPaymentRequest initialPayment) {
+        if (initialPayment == null) {
+            return null;
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(receiptIdempotencyKey.getBytes(StandardCharsets.UTF_8));
+            return "RECEIPT-INITIAL:" + HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is not available", exception);
+        }
+    }
+
+    private GoodsReceiptResponse mapResponse(GoodsReceipt receipt) {
+        return mapResponse(receipt, supplierDebtCalculator.validPaidAmount(receipt.getId()));
+    }
+
+    private GoodsReceiptResponse mapResponse(GoodsReceipt receipt, BigDecimal paidAmount) {
+        return supplierDebtCalculator.apply(
+            goodsReceiptMapper.toResponse(receipt), receipt, paidAmount);
     }
 
     private String normalizeRequired(String value, String fieldName) {

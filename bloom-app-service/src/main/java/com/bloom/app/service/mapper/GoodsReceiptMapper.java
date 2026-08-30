@@ -10,5 +10,8 @@ public interface GoodsReceiptMapper {
     @Mapping(source = "supplier.id", target = "supplierId")
     @Mapping(source = "supplier.code", target = "supplierCode")
     @Mapping(source = "supplierNameSnapshot", target = "supplierName")
+    @Mapping(target = "paidAmount", ignore = true)
+    @Mapping(target = "outstandingAmount", ignore = true)
+    @Mapping(target = "paymentStatus", ignore = true)
     GoodsReceiptResponse toResponse(GoodsReceipt goodsReceipt);
 }
