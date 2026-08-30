@@ -66,9 +66,6 @@ public class GoodsReceipt {
     @Column(name = "total_amount", nullable = false, precision = 19, scale = 4, updatable = false)
     private BigDecimal totalAmount;
 
-    @Column(name = "paid_amount", nullable = false, precision = 19, scale = 4)
-    private BigDecimal paidAmount;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private GoodsReceiptStatus status;

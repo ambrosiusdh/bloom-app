@@ -1,6 +1,7 @@
 package com.bloom.app.web.controller;
 
 import com.bloom.app.api.dto.response.supplier.SupplierResponse;
+import com.bloom.app.api.dto.response.supplier.SupplierOutstandingBalanceResponse;
 import com.bloom.app.api.exception.GlobalExceptionHandler;
 import com.bloom.app.service.SupplierService;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
+import java.math.BigDecimal;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -99,6 +101,25 @@ class SupplierControllerTest {
             .andExpect(jsonPath("$.data.name").value("Bloom Textile"))
             .andExpect(jsonPath("$.data.contactNumber").value("021-555"))
             .andExpect(jsonPath("$.data.address").value("Jakarta"));
+    }
+
+    @Test
+    void returnsDerivedOutstandingBalance() throws Exception {
+        when(supplierService.getOutstandingBalance("SUP-001")).thenReturn(
+            SupplierOutstandingBalanceResponse.builder()
+                .supplierId(10L)
+                .supplierCode("SUP-001")
+                .supplierName("Bloom Textile")
+                .totalPostedAmount(new BigDecimal("100.0000"))
+                .paidAmount(new BigDecimal("40.0000"))
+                .outstandingAmount(new BigDecimal("60.0000"))
+                .build());
+
+        mockMvc.perform(get("/api/suppliers/SUP-001/outstanding-balance"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.totalPostedAmount").value(100.0))
+            .andExpect(jsonPath("$.data.paidAmount").value(40.0))
+            .andExpect(jsonPath("$.data.outstandingAmount").value(60.0));
     }
 
     @Test
