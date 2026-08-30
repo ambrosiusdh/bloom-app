@@ -172,6 +172,8 @@ public class SaleServiceImpl implements SaleService {
     @Transactional
     public SaleCheckoutStatusResponse getCheckoutStatus(String checkoutIdempotencyKey) {
         String normalizedCheckoutKey = validateAndNormalizeCheckoutKey(checkoutIdempotencyKey);
+        // Intentionally not read-only: recovery must use the primary database transaction
+        // and the same transaction-scoped advisory lock as checkout creation.
         saleRepository.lockCheckoutKey(normalizedCheckoutKey);
 
         return saleRepository.findByCheckoutIdempotencyKey(normalizedCheckoutKey)

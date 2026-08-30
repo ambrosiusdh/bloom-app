@@ -1,5 +1,6 @@
 package com.bloom.app.api.exception;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -11,6 +12,8 @@ import com.bloom.app.domain.exception.FractionalQuantityPolicyImmutableException
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class GlobalExceptionHandlerTest {
 
@@ -96,5 +99,24 @@ class GlobalExceptionHandlerTest {
         assertThat(body.get("code")).isEqualTo(HttpStatus.UNAUTHORIZED.value());
         assertThat(body.get("errorType"))
             .isEqualTo("AuthenticationCredentialsNotFoundException");
+    }
+
+    @Test
+    void sanitizesUnexpectedErrorsForEveryEndpoint() {
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getRequestURI()).thenReturn("/api/example");
+
+        var response = handler.handleGenericException(
+            request, new RuntimeException("raw SQL constraint detail"));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(response.getBody()).isInstanceOf(Map.class);
+        Map<?, ?> body = (Map<?, ?>) response.getBody();
+        assertThat(body.get("success")).isEqualTo(false);
+        assertThat(body.get("code")).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.value());
+        assertThat(body.get("message")).isEqualTo("An unexpected error occurred");
+        assertThat(body.get("errorType")).isEqualTo("InternalServerError");
+        assertThat(body.containsValue("raw SQL constraint detail")).isFalse();
+        assertThat(body.containsValue("RuntimeException")).isFalse();
     }
 }

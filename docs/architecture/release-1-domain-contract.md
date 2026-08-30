@@ -416,9 +416,11 @@ This contract does not add `BANK_TRANSFER` as a sale payment method. The current
 ```
 
 - `COMPLETED` means a committed sale is visible for the key and `sale` contains the complete backend-confirmed `SaleResponse`, including its code, cash-session link, decimal lines and amounts, payment type, and audit fields.
+- Within `SaleItemResponse`, the historical financial facts are `quantity`, `unitPrice`, and `subtotal`. The nested `item` remains the existing live item-master projection, so mutable item fields such as name, description, current price, and current stock can differ from the values visible when checkout originally completed. Clients must use the persisted sale-line and sale totals for historical financial display and reconciliation.
 - `UNKNOWN` means no committed sale is visible for the key at lookup time and returns HTTP 200 with `sale: null`. It is not proof that the original POST failed.
 - The frontend retains the original key and may poll this endpoint or explicitly retry the identical POST with that same key after an ambiguous outcome.
-- The lookup takes the same per-checkout-key advisory transaction lock before querying. It therefore waits for a same-key checkout already inside its transaction to commit or roll back.
+- The response explicitly sends `Cache-Control: no-store`; clients and intermediaries must not cache a financial recovery result whose identity is carried in the `Idempotency-Key` header.
+- The lookup intentionally uses a non-read-only primary-database transaction and takes the same per-checkout-key advisory transaction lock before querying. It therefore waits for a same-key checkout already inside its transaction to commit or roll back.
 - The lookup is read-only in domain behavior: it never creates a sale, reserves or mutates stock, changes a cash session, records stock/cash movements, or invokes checkout creation.
 - A checkout that begins only after an `UNKNOWN` lookup is still protected by the same-key POST idempotency rules. Release 1 does not report `PENDING` because no reliable persisted state proves that outcome.
 - Neither the stored idempotency key nor `checkoutRequestHash` is exposed in `SaleResponse`.

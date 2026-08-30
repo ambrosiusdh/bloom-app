@@ -15,9 +15,11 @@ import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.service.SaleService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.validation.beanvalidation.MethodValidationInterceptor;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -28,9 +30,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -52,8 +56,10 @@ class SaleControllerTest {
     @BeforeEach
     void setUp() {
         saleService = mock(SaleService.class);
+        ProxyFactory controllerProxy = new ProxyFactory(new SaleController(saleService));
+        controllerProxy.addAdvice(new MethodValidationInterceptor());
         mockMvc = MockMvcBuilders
-            .standaloneSetup(new SaleController(saleService))
+            .standaloneSetup(controllerProxy.getProxy())
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
     }
@@ -83,11 +89,6 @@ class SaleControllerTest {
     @Test
     void postRejectsMissingBlankAndOverlongIdempotencyKeys() throws Exception {
         String overlongKey = "x".repeat(101);
-        when(saleService.createSale(eq("   "), any()))
-            .thenThrow(new IllegalArgumentException("Idempotency-Key header is required"));
-        when(saleService.createSale(eq(overlongKey), any()))
-            .thenThrow(new IllegalArgumentException(
-                "Idempotency-Key must not exceed 100 characters"));
 
         mockMvc.perform(post("/api/sales")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -103,16 +104,13 @@ class SaleControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(VALID_CHECKOUT_BODY))
             .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(saleService);
     }
 
     @Test
     void checkoutStatusRequiresTheSameValidIdempotencyKey() throws Exception {
         String overlongKey = "x".repeat(101);
-        when(saleService.getCheckoutStatus("  "))
-            .thenThrow(new IllegalArgumentException("Idempotency-Key header is required"));
-        when(saleService.getCheckoutStatus(overlongKey))
-            .thenThrow(new IllegalArgumentException(
-                "Idempotency-Key must not exceed 100 characters"));
 
         mockMvc.perform(get("/api/sales/checkout-status"))
             .andExpect(status().isBadRequest());
@@ -122,6 +120,8 @@ class SaleControllerTest {
         mockMvc.perform(get("/api/sales/checkout-status")
                 .header("Idempotency-Key", overlongKey))
             .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(saleService);
     }
 
     @Test
@@ -136,6 +136,7 @@ class SaleControllerTest {
         mockMvc.perform(get("/api/sales/checkout-status")
                 .header("Idempotency-Key", "checkout-complete"))
             .andExpect(status().isOk())
+            .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.code").value(200))
             .andExpect(jsonPath("$.data.status").value("COMPLETED"))

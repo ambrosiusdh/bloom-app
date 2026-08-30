@@ -51,6 +51,8 @@ import org.springframework.security.authentication.AuthenticationCredentialsNotF
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import jakarta.persistence.EntityManagerFactory;
 
@@ -108,6 +110,9 @@ class CashSessionPostgreSqlIntegrationTest {
 
     @Autowired
     private EntityManagerFactory entityManagerFactory;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -461,7 +466,7 @@ class CashSessionPostgreSqlIntegrationTest {
     }
 
     @Test
-    void completedCheckoutCanBeRecoveredWithItsFullOriginalSaleResponse() {
+    void completedCheckoutCanBeRecoveredWithItsCompleteBackendConfirmedSaleResponse() {
         authenticateAdmin();
         Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
         ItemFixture item = insertCheckoutItem("RECOVER", "10.0000", "5.0000");
@@ -494,6 +499,106 @@ class CashSessionPostgreSqlIntegrationTest {
                 assertThat(line.getSubtotal()).isEqualByComparingTo("20.0000");
             });
         });
+    }
+
+    @Test
+    void checkoutStatusWaitsForInFlightSameKeyCheckoutCommitThenReturnsCompleted()
+            throws Exception {
+        authenticateAdmin();
+        cashSessionService.openSession(openRequest("100.0000"));
+        ItemFixture item = insertCheckoutItem("STATUS-WAIT-COMMIT", "10.0000", "5.0000");
+        String checkoutKey = "status-wait-commit-" + UUID.randomUUID();
+        CreateSaleRequest request = checkoutRequest(
+            PaymentType.CASH, "10.0000", item.sku(), "1.0000");
+        SecurityContextHolder.clearContext();
+
+        CountDownLatch checkoutReadyToCommit = new CountDownLatch(1);
+        CountDownLatch releaseCheckout = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            CompletableFuture<SaleResponse> checkout = CompletableFuture.supplyAsync(() -> {
+                authenticateAdmin();
+                try {
+                    return new TransactionTemplate(transactionManager).execute(status -> {
+                        SaleResponse created = saleService.createSale(checkoutKey, request);
+                        checkoutReadyToCommit.countDown();
+                        awaitLatch(releaseCheckout);
+                        return created;
+                    });
+                } finally {
+                    SecurityContextHolder.clearContext();
+                }
+            }, executor);
+            assertThat(checkoutReadyToCommit.await(10, TimeUnit.SECONDS)).isTrue();
+
+            CompletableFuture<SaleCheckoutStatusResponse> lookup = CompletableFuture.supplyAsync(
+                () -> saleService.getCheckoutStatus(checkoutKey), executor);
+            awaitAdvisoryLockWaiter(lookup);
+
+            releaseCheckout.countDown();
+            SaleResponse created = checkout.get(10, TimeUnit.SECONDS);
+            SaleCheckoutStatusResponse recovered = lookup.get(10, TimeUnit.SECONDS);
+
+            assertThat(recovered.getStatus())
+                .isEqualTo(SaleCheckoutStatusResponse.Status.COMPLETED);
+            assertThat(recovered.getSale().getCode()).isEqualTo(created.getCode());
+        } finally {
+            releaseCheckout.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void checkoutStatusWaitsForInFlightSameKeyCheckoutRollbackThenReturnsUnknown()
+            throws Exception {
+        authenticateAdmin();
+        cashSessionService.openSession(openRequest("100.0000"));
+        ItemFixture item = insertCheckoutItem("STATUS-WAIT-ROLLBACK", "10.0000", "5.0000");
+        String checkoutKey = "status-wait-rollback-" + UUID.randomUUID();
+        CreateSaleRequest request = checkoutRequest(
+            PaymentType.CASH, "10.0000", item.sku(), "1.0000");
+        long cashMovementCountBefore = cashMovementRepository.count();
+        SecurityContextHolder.clearContext();
+
+        CountDownLatch checkoutReadyToRollback = new CountDownLatch(1);
+        CountDownLatch releaseCheckout = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            CompletableFuture<Void> checkout = CompletableFuture.runAsync(() -> {
+                authenticateAdmin();
+                try {
+                    new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        saleService.createSale(checkoutKey, request);
+                        checkoutReadyToRollback.countDown();
+                        awaitLatch(releaseCheckout);
+                        status.setRollbackOnly();
+                    });
+                } finally {
+                    SecurityContextHolder.clearContext();
+                }
+            }, executor);
+            assertThat(checkoutReadyToRollback.await(10, TimeUnit.SECONDS)).isTrue();
+
+            CompletableFuture<SaleCheckoutStatusResponse> lookup = CompletableFuture.supplyAsync(
+                () -> saleService.getCheckoutStatus(checkoutKey), executor);
+            awaitAdvisoryLockWaiter(lookup);
+
+            releaseCheckout.countDown();
+            checkout.get(10, TimeUnit.SECONDS);
+            SaleCheckoutStatusResponse recovered = lookup.get(10, TimeUnit.SECONDS);
+
+            assertThat(recovered.getStatus())
+                .isEqualTo(SaleCheckoutStatusResponse.Status.UNKNOWN);
+            assertThat(recovered.getSale()).isNull();
+            assertThat(saleRepository.findByCheckoutIdempotencyKey(checkoutKey)).isEmpty();
+            assertThat(stockMovementRepository.findByProductId(item.id())).isEmpty();
+            assertThat(cashMovementRepository.count()).isEqualTo(cashMovementCountBefore);
+            assertThat(itemRepository.findById(item.id()).orElseThrow().getStockStore())
+                .isEqualByComparingTo("5.0000");
+        } finally {
+            releaseCheckout.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test
@@ -877,6 +982,40 @@ class CashSessionPostgreSqlIntegrationTest {
         } finally {
             start.countDown();
             executor.shutdownNow();
+        }
+    }
+
+    private void awaitAdvisoryLockWaiter(CompletableFuture<?> lookup) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            Long waiters = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND wait_event_type = 'Lock'
+                  AND wait_event = 'advisory'
+                """, Long.class);
+            if (waiters != null && waiters > 0) {
+                assertThat(lookup).isNotDone();
+                return;
+            }
+            if (lookup.isDone()) {
+                throw new AssertionError(
+                    "Checkout-status returned before the same-key checkout transaction completed");
+            }
+            Thread.sleep(25);
+        }
+        throw new AssertionError("Checkout-status did not wait on the advisory lock");
+    }
+
+    private void awaitLatch(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Timed out waiting for test coordination");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for test coordination", exception);
         }
     }
 

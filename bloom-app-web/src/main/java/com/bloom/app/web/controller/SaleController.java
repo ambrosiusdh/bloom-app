@@ -16,6 +16,7 @@ import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -53,7 +54,9 @@ public class SaleController {
             @NotBlank(message = "Idempotency-Key header is required")
             @Size(max = 100, message = "Idempotency-Key must not exceed 100 characters")
             String checkoutIdempotencyKey) {
-        return ResponseHelper.ok(saleService.getCheckoutStatus(checkoutIdempotencyKey));
+        return ResponseEntity.ok()
+            .cacheControl(CacheControl.noStore())
+            .body(ApiResponse.ok(saleService.getCheckoutStatus(checkoutIdempotencyKey)));
     }
 
     @GetMapping
