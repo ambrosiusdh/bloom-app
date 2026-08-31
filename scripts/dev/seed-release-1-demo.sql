@@ -33,8 +33,7 @@ VALUES (
 );
 
 INSERT INTO items (
-    name, sku, description, price, stock_quantity,
-    stock_store, stock_warehouse,
+    name, sku, description, price, stock_store, stock_warehouse,
     base_unit_of_measure, fractional_quantity_allowed,
     active, item_category_id,
     created_at, updated_at, created_by, updated_by, version
@@ -42,7 +41,7 @@ INSERT INTO items (
 VALUES
     (
         'Semen Portland 50kg', 'DEMO-BB-001', 'Semen untuk konstruksi umum',
-        75000.0000, 57.0000, 42.0000, 15.0000,
+        75000.0000, 42.0000, 15.0000,
         'PIECE', FALSE, TRUE,
         (SELECT id FROM item_categories WHERE code = 'BB'),
         CURRENT_TIMESTAMP - INTERVAL '30 days', CURRENT_TIMESTAMP - INTERVAL '2 hours',
@@ -50,7 +49,7 @@ VALUES
     ),
     (
         'Cat Tembok Putih', 'DEMO-BB-002', 'Cat tembok yang dijual per liter',
-        120000.0000, 39.0000, 19.2500, 19.7500,
+        120000.0000, 19.2500, 19.7500,
         'LITER', TRUE, TRUE,
         (SELECT id FROM item_categories WHERE code = 'BB'),
         CURRENT_TIMESTAMP - INTERVAL '30 days', CURRENT_TIMESTAMP - INTERVAL '2 hours',
@@ -58,7 +57,7 @@ VALUES
     ),
     (
         'Paku 5cm Curah', 'DEMO-PRT-001', 'Paku curah yang dijual per kilogram',
-        18000.0000, 103.0000, 103.0000, 0.0000,
+        18000.0000, 103.0000, 0.0000,
         'KILOGRAM', TRUE, TRUE,
         (SELECT id FROM item_categories WHERE code = 'PRT'),
         CURRENT_TIMESTAMP - INTERVAL '30 days', CURRENT_TIMESTAMP - INTERVAL '4 hours',
@@ -66,7 +65,7 @@ VALUES
     ),
     (
         'Palu Besi', 'DEMO-PRT-002', 'Palu besi untuk pekerjaan rumah',
-        85000.0000, 6.0000, 6.0000, 0.0000,
+        85000.0000, 6.0000, 0.0000,
         'PIECE', FALSE, TRUE,
         (SELECT id FROM item_categories WHERE code = 'PRT'),
         CURRENT_TIMESTAMP - INTERVAL '30 days', CURRENT_TIMESTAMP - INTERVAL '4 hours',
@@ -74,7 +73,7 @@ VALUES
     ),
     (
         'Kabel NYM 2x1.5', 'DEMO-LNN-001', 'Kabel listrik yang dijual per meter',
-        12000.0000, 67.7500, 32.7500, 35.0000,
+        12000.0000, 32.7500, 35.0000,
         'METER', TRUE, TRUE,
         (SELECT id FROM item_categories WHERE code = 'LNN'),
         CURRENT_TIMESTAMP - INTERVAL '30 days', CURRENT_TIMESTAMP - INTERVAL '1 day',
@@ -82,7 +81,7 @@ VALUES
     ),
     (
         'Ember Bangunan', 'DEMO-LNN-002', 'Contoh item stok rendah',
-        35000.0000, 3.0000, 3.0000, 0.0000,
+        35000.0000, 3.0000, 0.0000,
         'PIECE', FALSE, TRUE,
         (SELECT id FROM item_categories WHERE code = 'LNN'),
         CURRENT_TIMESTAMP - INTERVAL '30 days', CURRENT_TIMESTAMP - INTERVAL '30 days',
@@ -108,7 +107,7 @@ VALUES
     );
 
 INSERT INTO goods_receipts (
-    code, received_date, supplier_name, supplier_id,
+    code, received_date, supplier_name_snapshot, supplier_id,
     total_amount, description, created_at, created_by,
     create_idempotency_key, create_request_hash, status, version
 )

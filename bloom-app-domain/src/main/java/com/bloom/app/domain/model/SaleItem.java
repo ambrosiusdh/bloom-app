@@ -24,11 +24,11 @@ public class SaleItem {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "sale_id")
+    @JoinColumn(name = "sale_id", nullable = false)
     private Sale sale;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "item_id")
+    @JoinColumn(name = "item_id", nullable = false)
     private Item item;
 
     @Enumerated(EnumType.STRING)
@@ -38,9 +38,9 @@ public class SaleItem {
     @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal quantity;
 
-    @Column(precision = 19, scale = 4)
+    @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal unitPrice;
 
-    @Column(precision = 19, scale = 4)
+    @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal subtotal;
 }

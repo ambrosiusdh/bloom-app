@@ -55,8 +55,6 @@ class ItemMapperTest {
         assertThat(response.isBaseUnitOfMeasureLocked()).isTrue();
         assertThat(response.isFractionalQuantityAllowedLocked()).isTrue();
 
-        // Temporary compatibility aggregate; location fields above map directly from Item.
-        assertThat(response.getStockQuantity()).isEqualTo(new BigDecimal("1.2501"));
     }
 
     @Test
