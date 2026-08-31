@@ -5,6 +5,7 @@ import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
 import com.bloom.app.api.dto.request.sale.FilterSaleRequest;
 import com.bloom.app.api.dto.response.ApiResponse;
+import com.bloom.app.api.dto.response.sale.SaleCheckoutStatusResponse;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.service.SaleService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -15,6 +16,7 @@ import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -37,13 +39,24 @@ public class SaleController {
 
     @PostMapping
     public ResponseEntity<ApiResponse<SaleResponse>> createSale(
-            @RequestHeader(value = "Idempotency-Key", required = false)
+            @RequestHeader("Idempotency-Key")
             @NotBlank(message = "Idempotency-Key header is required")
             @Size(max = 100, message = "Idempotency-Key must not exceed 100 characters")
             String checkoutIdempotencyKey,
             @Valid @RequestBody CreateSaleRequest request) {
         SaleResponse response = saleService.createSale(checkoutIdempotencyKey, request);
         return ResponseHelper.ok(response);
+    }
+
+    @GetMapping("/checkout-status")
+    public ResponseEntity<ApiResponse<SaleCheckoutStatusResponse>> getCheckoutStatus(
+            @RequestHeader("Idempotency-Key")
+            @NotBlank(message = "Idempotency-Key header is required")
+            @Size(max = 100, message = "Idempotency-Key must not exceed 100 characters")
+            String checkoutIdempotencyKey) {
+        return ResponseEntity.ok()
+            .cacheControl(CacheControl.noStore())
+            .body(ApiResponse.ok(saleService.getCheckoutStatus(checkoutIdempotencyKey)));
     }
 
     @GetMapping

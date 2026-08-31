@@ -169,8 +169,9 @@ public class GlobalExceptionHandler {
         log.error("Unhandled exception caught at endpoint {}: {}", request.getRequestURI(), ex.getMessage(), ex);
         Map<String, Object> body = new HashMap<>();
         body.put("success", false);
-        body.put("message", ex.getMessage());
-        body.put("errorType", ex.getClass().getSimpleName());
+        body.put("message", "An unexpected error occurred");
+        body.put("code", HttpStatus.INTERNAL_SERVER_ERROR.value());
+        body.put("errorType", "InternalServerError");
 
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
     }
