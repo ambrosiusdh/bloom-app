@@ -54,7 +54,7 @@ public class GoodsReceipt {
     @JoinColumn(name = "supplier_id", nullable = false, updatable = false)
     private Supplier supplier;
 
-    @Column(name = "supplier_name", nullable = false, updatable = false)
+    @Column(name = "supplier_name_snapshot", nullable = false, updatable = false)
     private String supplierNameSnapshot;
 
     @Column(name = "create_idempotency_key", nullable = false, unique = true, length = 100, updatable = false)

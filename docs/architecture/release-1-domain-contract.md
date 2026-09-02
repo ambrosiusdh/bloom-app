@@ -43,6 +43,8 @@ Repository names are used where they already exist: `Item`, `Sale`, `SaleItem`, 
 | R1-20 | A `CLOSED` cash session rejects new cash expenses and every other new operation that would change that session's drawer cash. |
 | R1-21 | Expense mistakes are voided or reversed and retained for audit; they are never deleted. |
 | R1-22 | Release 1 targets the existing React web app. React Native is future scope. |
+| R1-23 | Every successfully committed Release 1 sale is `COMPLETED` and `PAID`; customer credit, unpaid sales, and partially paid sales are unsupported. |
+| R1-24 | Sale void, cancellation, refund, and item-return mutations are outside Release 1. The sale read model reports `correctionStatus: NONE`. |
 
 ## Schema ownership and runtime validation
 
@@ -134,7 +136,7 @@ The public item list and detail responses expose the same inventory state: `acti
 
 `hasStockMovements` is true when at least one `StockMovement` exists for the item. Both lock fields are true exactly when `hasStockMovements` is true, because both measurement rules become immutable at the first movement. The separate lock fields are retained so clients consume explicit server policy rather than infer it from balances or assume both policies will always evolve together.
 
-`stockStore` and `stockWarehouse` are independent quantities. Clients must not merge them. The legacy `stockQuantity` response field is retained temporarily only for compatibility and is deprecated in the API schema. New and migrated clients must use `stockStore` and `stockWarehouse`; `stockQuantity` is not authoritative for the item inventory read model and will be removed in a later compatibility cleanup.
+`stockStore` and `stockWarehouse` are independent quantities. Clients must not merge them. The legacy `stockQuantity` response field was temporary compatibility only and was removed in the Release 1 destructive-contract cleanup. Clients must use `stockStore` and `stockWarehouse`; no aggregate inventory response field is authoritative.
 
 ### Stock authority
 
@@ -398,6 +400,9 @@ This contract does not add `BANK_TRANSFER` as a sale payment method. The current
     "sale": {
       "code": "SALE-000123",
       "sessionId": 7,
+      "saleStatus": "COMPLETED",
+      "paymentStatus": "PAID",
+      "correctionStatus": "NONE",
       "subtotalAmount": 20.0000,
       "discountAmount": 0.0000,
       "totalAmount": 20.0000,
@@ -426,6 +431,52 @@ This contract does not add `BANK_TRANSFER` as a sale payment method. The current
 - Neither the stored idempotency key nor `checkoutRequestHash` is exposed in `SaleResponse`.
 
 The sale checkout HTTP error contract is: malformed/invalid input is HTTP 400; an actually missing referenced item is HTTP 404; changed-content idempotency reuse, no/open-session races, and authoritative insufficient-stock conflicts are HTTP 409. Error responses retain the existing API error shape and expose a stable domain exception type or sale error code without returning raw SQL or persistence details.
+
+#### Sales history and detail read contract (FE-22 backend prerequisite)
+
+`GET /api/sales` and `GET /api/sales/details?code=...` return the same stable
+`SaleResponse` representation. A successfully committed Release 1 sale is always represented by
+the backend as `saleStatus: COMPLETED`, `paymentStatus: PAID`, and
+`correctionStatus: NONE`. These are typed server fields derived from the current transaction
+invariants; they are not database columns and clients must not infer payment or lifecycle status by
+comparing `paidAmount` with `totalAmount`.
+
+Release 1 does not support customer credit, unpaid sales, or partial payment. It also has no sale
+void, cancellation, refund, or item-return mutation. `NONE` explicitly means no supported void or
+return correction exists for the sale. A future correction status requires an implemented,
+auditable domain operation; persisted audit facts; defined stock and payment reversal semantics;
+and separately approved frontend mutation scope. This contract does not claim that such operations
+exist.
+
+The stable `SaleResponse` fields are `code`, `sessionId`, `saleStatus`, `paymentStatus`,
+`correctionStatus`, `subtotalAmount`, `discountAmount`, `totalAmount`, `paidAmount`,
+`changeAmount`, `paymentType`, `description`, `createdAt`, `updatedAt`, `createdBy`, `updatedBy`,
+and `saleItems`. The financial meanings remain:
+
+- `subtotalAmount` is the backend-calculated sum of persisted line subtotals.
+- `discountAmount` is the recorded discount and `totalAmount` is the backend-calculated final total.
+- `paidAmount` is tender received for `CASH` or externally confirmed settlement for `QRIS`.
+- `changeAmount` is backend-calculated cash change and is zero for `QRIS`.
+- `sessionId` identifies the owning cash session and `code` is the stable sale reference.
+
+Each `SaleItemResponse` contains `item`, `stockLocation`, `quantity`, `unitPrice`, and `subtotal`.
+The decimal `quantity`, `unitPrice`, and `subtotal`, plus `stockLocation`, come from the persisted
+sale line. Historical financial display must use those persisted line amounts, never the nested live
+`Item.price`. The nested item projection supplies SKU, name, and `baseUnitOfMeasure`; mutable item
+master display data is not a historical snapshot and can change after checkout.
+
+The list supports only `code`, `createdBy`, `startDate`, `endDate`, `page`, and `size`. `code` and
+`createdBy` are case-insensitive contains filters. `startDate` and `endDate` are inclusive, and a
+range whose start is after its end is invalid. Filtering occurs before paging. Request page numbers
+follow `PagingHelper` (page 1 is the first page, with omitted/zero also resolving to the first page),
+while Spring `Page` response metadata is zero-based. Results are always ordered by `createdAt DESC`
+then `id DESC`; client sorting is not part of this Release 1 endpoint contract. No matches return
+HTTP 200 with an empty page.
+
+Paged reads first select the correctly filtered and ordered sale IDs, then fetch those sales with
+their cash session, lines, and each line's item in one batched read-model query. Detail and checkout
+recovery use the same relationship graph. This avoids per-row session or item enrichment and keeps
+collection fetching compatible with database paging.
 
 ### Expenses
 
@@ -492,7 +543,7 @@ This matrix defines only mutability needed by the approved contract. Fields not 
 |---|---|---|---|
 | `Item` | Ordinary master-data maintenance is outside this contract's mutability rules. `baseUnitOfMeasure` and `fractionalQuantityAllowed` may change only while the item has no movements. | Both measurement fields become immutable when the first `StockMovement` exists. `stockStore` and `stockWarehouse` are never directly maintained as master data. | Stock changes use `StockMovementService`. UOM or fractional-policy conversion is not a correction path in Release 1. |
 | `StockMovement` | Created once as part of a stock transaction. | Item, location, direction, quantity, source, and before/after balances are immutable after recording. | Record a compensating/correction movement through `StockMovementService`; retain the original. |
-| `Sale` / `SaleItem` | Created as one sale transaction and linked to the open `CashSession`. | The session link, payment method, lines, quantities, unit-price snapshots, and calculated amounts are transaction facts after recording. | Sale void/refund behavior is unresolved; do not edit a recorded sale to simulate it. |
+| `Sale` / `SaleItem` | Created as one fully settled, `COMPLETED` sale transaction and linked to the open `CashSession`. | The session link, payment method, lines, quantities, unit-price snapshots, and calculated amounts are transaction facts after recording. | No sale correction mutation exists in Release 1; retain the posted sale and report `correctionStatus: NONE`. |
 | `GoodsReceipt` / `GoodsReceiptItem` | Created as one receipt transaction with stock movements and payable impact. | Supplier, receipt lines, quantities, purchase-price snapshots, totals, and resulting movements are transaction facts after recording. | Receipt cancellation/return behavior is unresolved; do not edit a recorded receipt to simulate it. |
 | Supplier payment record | Recorded with amount, method, payable application, and cash-session link when it is a drawer-cash payment. | Those financial facts are immutable after recording. | Payment reversal/void behavior is unresolved; do not delete or overwrite a recorded payment. |
 | `Supplier` | Supplier master data may be maintained independently of transaction facts. | Historical receipts and payments retain their transaction identity; the supplier's payable is not a directly editable balance. | Correct source receipts/payments through an approved audit path, not by overwriting debt. |
@@ -507,9 +558,10 @@ The following are outside Release 1:
 - Conversion ratios, UOM hierarchies, and automatic quantity conversion.
 - Stock locations other than `STORE` and `WAREHOUSE`.
 - Negative inventory, back-ordering against unavailable stock, or using one location's balance to cover another location.
-- Customer credit, customer debt, accounts receivable, or reusing supplier payable concepts for customers.
+- Customer credit, customer debt, accounts receivable, unpaid or partially paid sales, or reusing supplier payable concepts for customers.
 - Supplier payment methods other than `CASH`, `BANK_TRANSFER`, and `QRIS`.
 - Sale payment methods other than the existing `CASH` and `QRIS` scope.
+- Sale void, cancellation, refund, and item-return mutations.
 - More than one concurrently open drawer/cash session.
 - React Native. Release 1 integrates with the existing React web app.
 - Hibernate-generated schema or any non-Flyway schema mutation.
@@ -553,7 +605,7 @@ The approved contract is sufficient for planning, but these decisions are requir
 
 1. The allowed `baseUnitOfMeasure` values and whether they are stored as an enum, controlled code, or another representation.
 2. Supplier-payment allocation across receipts, overpayment handling, and the supplier-payment void/reversal policy.
-3. Goods-receipt cancellation/return and sale void/refund lifecycles.
+3. Goods-receipt cancellation/return behavior.
 4. A future post-close expense-correction workflow that does not mutate a reconciled session.
 5. Cash-session reopen policy and authorization, if reopening is to exist at all.
 6. The React web client API contract beyond the sale checkout contract documented above, because that client is not present in this repository.

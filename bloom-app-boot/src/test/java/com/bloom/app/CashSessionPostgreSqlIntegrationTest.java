@@ -1068,13 +1068,13 @@ class CashSessionPostgreSqlIntegrationTest {
         String sku = "CHECKOUT-" + purpose + "-" + UUID.randomUUID();
         Long id = jdbcTemplate.queryForObject("""
             INSERT INTO items (
-                name, sku, price, stock_quantity, stock_store, stock_warehouse,
+                name, sku, price, stock_store, stock_warehouse,
                 base_unit_of_measure, fractional_quantity_allowed, active,
                 item_category_id, version
-            ) VALUES (?, ?, ?, ?, ?, 0.0000, 'PIECE', FALSE, TRUE, 1, 0)
+            ) VALUES (?, ?, ?, ?, 0.0000, 'PIECE', FALSE, TRUE, 1, 0)
             RETURNING id
             """, Long.class, purpose + " checkout item", sku,
-            new BigDecimal(price), new BigDecimal(storeStock), new BigDecimal(storeStock));
+            new BigDecimal(price), new BigDecimal(storeStock));
         return new ItemFixture(id, sku);
     }
 
