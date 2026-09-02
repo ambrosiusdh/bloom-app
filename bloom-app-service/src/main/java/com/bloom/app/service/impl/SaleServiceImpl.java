@@ -106,9 +106,9 @@ public class SaleServiceImpl implements SaleService {
 
         for (AggregatedSaleLine line : aggregateSaleLines(request.getSaleItemList()).values()) {
             Item item = line.item();
-            BigDecimal stockQuantity = stockAt(item, line.stockLocation());
+            BigDecimal availableStock = stockAt(item, line.stockLocation());
 
-            if (stockQuantity.compareTo(line.quantity()) < 0) {
+            if (availableStock.compareTo(line.quantity()) < 0) {
                 throw new BusinessException(
                     ErrorCode.SALE_INSUFFICIENT_STOCK_STORE, item.getName(), line.stockLocation());
             }

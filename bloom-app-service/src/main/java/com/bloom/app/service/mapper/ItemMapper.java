@@ -16,14 +16,12 @@ import org.mapstruct.NullValuePropertyMappingStrategy;
 )
 public interface ItemMapper {
     @Mapping(target = "category", source = "category")
-    @Mapping(target = "stockQuantity", source = "totalStock")
     @Mapping(target = "hasStockMovements", constant = "false")
     @Mapping(target = "baseUnitOfMeasureLocked", constant = "false")
     @Mapping(target = "fractionalQuantityAllowedLocked", constant = "false")
     ItemResponse itemToItemResponse(Item item);
 
     @Mapping(target = "category", source = "item.category")
-    @Mapping(target = "stockQuantity", source = "item.totalStock")
     @Mapping(target = "hasStockMovements", source = "hasStockMovements")
     @Mapping(target = "baseUnitOfMeasureLocked", source = "hasStockMovements")
     @Mapping(target = "fractionalQuantityAllowedLocked", source = "hasStockMovements")
