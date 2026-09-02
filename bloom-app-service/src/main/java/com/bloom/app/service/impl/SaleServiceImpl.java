@@ -36,7 +36,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -347,26 +349,56 @@ public class SaleServiceImpl implements SaleService {
     }
 
     @Override
+    @Transactional
     public Page<SaleResponse> filterSales(FilterSaleRequest request, Pageable pageable) {
         log.debug("SaleService filterSale with request: {}", request);
+        validateSaleFilters(request);
 
-        Page<Sale> salePage = saleRepository.findAll(SaleSpecification.filter(request), pageable);
+        Pageable stablePageable = PageRequest.of(
+            pageable.getPageNumber(),
+            pageable.getPageSize(),
+            Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))
+        );
 
-        List<SaleResponse> saleResponseList = salePage.getContent()
-                .stream()
-                .map(saleMapper::saleToResponse)
-                .toList();
+        Page<Sale> salePage = saleRepository.findAll(
+            SaleSpecification.filter(request), stablePageable);
 
-        return new PageImpl<>(saleResponseList, pageable, salePage.getTotalElements());
+        if (salePage.isEmpty()) {
+            return new PageImpl<>(List.of(), stablePageable, salePage.getTotalElements());
+        }
+
+        List<Long> saleIds = salePage.getContent().stream()
+            .map(Sale::getId)
+            .toList();
+        Map<Long, Sale> readModelsById = saleRepository.findReadModelsByIdIn(saleIds).stream()
+            .collect(java.util.stream.Collectors.toMap(Sale::getId, sale -> sale));
+
+        List<SaleResponse> saleResponseList = saleIds.stream()
+            .map(readModelsById::get)
+            .map(saleMapper::saleToResponse)
+            .toList();
+
+        return new PageImpl<>(saleResponseList, stablePageable, salePage.getTotalElements());
     }
 
     @Override
+    @Transactional
     public SaleResponse getSaleDetails(String code) {
         log.debug("SaleService getSaleDetails with code: {}", code);
-        Sale sale = saleRepository.findByCode(code)
+        Sale sale = saleRepository.findReadModelByCode(code)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sales not found"));
 
         return saleMapper.saleToResponse(sale);
+    }
+
+    private void validateSaleFilters(FilterSaleRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("Sale filters are required");
+        }
+        if (request.getStartDate() != null && request.getEndDate() != null
+                && request.getStartDate().isAfter(request.getEndDate())) {
+            throw new IllegalArgumentException("startDate must be before or equal to endDate");
+        }
     }
 
     @Override

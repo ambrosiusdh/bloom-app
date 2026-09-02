@@ -6,7 +6,11 @@ import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.api.dto.response.saleitem.SaleItemResponse;
 import com.bloom.app.api.exception.GlobalExceptionHandler;
 import com.bloom.app.domain.enums.PaymentType;
+import com.bloom.app.domain.enums.SaleCorrectionStatus;
+import com.bloom.app.domain.enums.SalePaymentStatus;
+import com.bloom.app.domain.enums.SaleStatus;
 import com.bloom.app.domain.enums.StockLocation;
+import com.bloom.app.domain.model.UnitOfMeasure;
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.exception.CashSessionConflictException;
@@ -17,9 +21,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.http.MediaType;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.MethodValidationInterceptor;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -60,6 +69,7 @@ class SaleControllerTest {
         controllerProxy.addAdvice(new MethodValidationInterceptor());
         mockMvc = MockMvcBuilders
             .standaloneSetup(controllerProxy.getProxy())
+            .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
     }
@@ -142,6 +152,9 @@ class SaleControllerTest {
             .andExpect(jsonPath("$.data.status").value("COMPLETED"))
             .andExpect(jsonPath("$.data.sale.code").value("SALE-20"))
             .andExpect(jsonPath("$.data.sale.sessionId").value(7))
+            .andExpect(jsonPath("$.data.sale.saleStatus").value("COMPLETED"))
+            .andExpect(jsonPath("$.data.sale.paymentStatus").value("PAID"))
+            .andExpect(jsonPath("$.data.sale.correctionStatus").value("NONE"))
             .andExpect(jsonPath("$.data.sale.subtotalAmount").value(12.5))
             .andExpect(jsonPath("$.data.sale.discountAmount").value(2.5))
             .andExpect(jsonPath("$.data.sale.totalAmount").value(10.0))
@@ -149,6 +162,9 @@ class SaleControllerTest {
             .andExpect(jsonPath("$.data.sale.changeAmount").value(10.0))
             .andExpect(jsonPath("$.data.sale.paymentType").value("CASH"))
             .andExpect(jsonPath("$.data.sale.saleItems[0].item.sku").value("ITEM-1"))
+            .andExpect(jsonPath("$.data.sale.saleItems[0].item.name").value("Fractional item"))
+            .andExpect(jsonPath("$.data.sale.saleItems[0].item.baseUnitOfMeasure").value("METER"))
+            .andExpect(jsonPath("$.data.sale.saleItems[0].stockLocation").value("WAREHOUSE"))
             .andExpect(jsonPath("$.data.sale.saleItems[0].quantity").value(1.25))
             .andExpect(jsonPath("$.data.sale.saleItems[0].unitPrice").value(10.0))
             .andExpect(jsonPath("$.data.sale.saleItems[0].subtotal").value(12.5))
@@ -174,6 +190,47 @@ class SaleControllerTest {
             .andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.data.status").value("UNKNOWN"))
             .andExpect(jsonPath("$.data.sale").value(nullValue()));
+    }
+
+    @Test
+    void listAndDetailSerializeTheSameAuthoritativeReadContract() throws Exception {
+        SaleResponse sale = fullSaleResponse();
+        when(saleService.filterSales(any(), any())).thenReturn(
+            new PageImpl<>(List.of(sale), PageRequest.of(0, 20), 1));
+        when(saleService.getSaleDetails("SALE-20")).thenReturn(sale);
+
+        mockMvc.perform(get("/api/sales")
+                .param("page", "1")
+                .param("size", "20")
+                .param("code", "sale")
+                .param("createdBy", "ADMIN")
+                .param("startDate", "2026-08-01T00:00:00Z")
+                .param("endDate", "2026-08-31T23:59:59Z"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.content[0].saleStatus").value("COMPLETED"))
+            .andExpect(jsonPath("$.data.content[0].paymentStatus").value("PAID"))
+            .andExpect(jsonPath("$.data.content[0].correctionStatus").value("NONE"))
+            .andExpect(jsonPath("$.data.content[0].saleItems[0].stockLocation")
+                .value("WAREHOUSE"))
+            .andExpect(jsonPath("$.data.number").value(0));
+
+        mockMvc.perform(get("/api/sales/details").param("code", "SALE-20"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.saleStatus").value("COMPLETED"))
+            .andExpect(jsonPath("$.data.paymentStatus").value("PAID"))
+            .andExpect(jsonPath("$.data.correctionStatus").value("NONE"))
+            .andExpect(jsonPath("$.data.totalAmount").value(10.0))
+            .andExpect(jsonPath("$.data.saleItems[0].unitPrice").value(10.0));
+
+        verify(saleService).filterSales(
+            org.mockito.ArgumentMatchers.argThat(filter ->
+                filter.getCode().equals("sale")
+                    && filter.getCreatedBy().equals("ADMIN")
+                    && filter.getStartDate().equals(Instant.parse("2026-08-01T00:00:00Z"))
+                    && filter.getEndDate().equals(Instant.parse("2026-08-31T23:59:59Z"))),
+            org.mockito.ArgumentMatchers.argThat(pageable ->
+                pageable.getPageNumber() == 0 && pageable.getPageSize() == 20));
+        verify(saleService).getSaleDetails("SALE-20");
     }
 
     @Test
@@ -206,6 +263,29 @@ class SaleControllerTest {
                 .content(VALID_CHECKOUT_BODY))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value("sale_insufficient_stock"));
+    }
+
+    @Test
+    void invalidReadFiltersAndMissingDetailsUseTheApiErrorEnvelope() throws Exception {
+        when(saleService.filterSales(any(), any()))
+            .thenThrow(new IllegalArgumentException(
+                "startDate must be before or equal to endDate"));
+        when(saleService.getSaleDetails("MISSING"))
+            .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sales not found"));
+
+        mockMvc.perform(get("/api/sales")
+                .param("startDate", "2026-09-01T00:00:00Z")
+                .param("endDate", "2026-08-01T00:00:00Z"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.errorType").value("IllegalArgumentException"));
+
+        mockMvc.perform(get("/api/sales/details").param("code", "MISSING"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.errorType").value("ResponseStatusException"));
     }
 
     @Test
@@ -253,6 +333,9 @@ class SaleControllerTest {
         return SaleResponse.builder()
             .code("SALE-20")
             .sessionId(7L)
+            .saleStatus(SaleStatus.COMPLETED)
+            .paymentStatus(SalePaymentStatus.PAID)
+            .correctionStatus(SaleCorrectionStatus.NONE)
             .subtotalAmount(new BigDecimal("12.5000"))
             .discountAmount(new BigDecimal("2.5000"))
             .totalAmount(new BigDecimal("10.0000"))
@@ -265,7 +348,12 @@ class SaleControllerTest {
             .createdBy("admin")
             .updatedBy("admin")
             .saleItems(List.of(SaleItemResponse.builder()
-                .item(ItemResponse.builder().sku("ITEM-1").build())
+                .item(ItemResponse.builder()
+                    .sku("ITEM-1")
+                    .name("Fractional item")
+                    .baseUnitOfMeasure(UnitOfMeasure.METER)
+                    .build())
+                .stockLocation(StockLocation.WAREHOUSE)
                 .quantity(new BigDecimal("1.2500"))
                 .unitPrice(new BigDecimal("10.0000"))
                 .subtotal(new BigDecimal("12.5000"))

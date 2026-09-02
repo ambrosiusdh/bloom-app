@@ -16,6 +16,9 @@ import org.mapstruct.NullValuePropertyMappingStrategy;
 public interface SaleMapper {
     @Mapping(target = "saleItems", source = "items")
     @Mapping(target = "sessionId", source = "cashSession.id")
+    @Mapping(target = "saleStatus", expression = "java(com.bloom.app.domain.enums.SaleStatus.COMPLETED)")
+    @Mapping(target = "paymentStatus", expression = "java(com.bloom.app.domain.enums.SalePaymentStatus.PAID)")
+    @Mapping(target = "correctionStatus", expression = "java(com.bloom.app.domain.enums.SaleCorrectionStatus.NONE)")
     SaleResponse saleToResponse(Sale sale);
 
     @Mapping(target = "items", ignore = true)

@@ -7,6 +7,7 @@ import org.springframework.data.jpa.domain.Specification;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class SaleSpecification {
     public static Specification<Sale> filter(FilterSaleRequest request) {
@@ -14,11 +15,11 @@ public class SaleSpecification {
             List<Predicate> predicates = new ArrayList<>();
 
             if (request.getCode() != null && !request.getCode().isEmpty()) {
-                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("code")), "%" + request.getCode().toLowerCase() + "%"));
+                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("code")), "%" + request.getCode().toLowerCase(Locale.ROOT) + "%"));
             }
 
             if (request.getCreatedBy() != null && !request.getCreatedBy().isEmpty()) {
-                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("createdBy")), "%" + request.getCreatedBy().toLowerCase() + "%"));
+                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("createdBy")), "%" + request.getCreatedBy().toLowerCase(Locale.ROOT) + "%"));
             }
 
             if (request.getStartDate() != null) {
