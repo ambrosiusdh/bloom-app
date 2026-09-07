@@ -1,6 +1,7 @@
 package com.bloom.app;
 
 import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
+import com.bloom.app.api.dto.request.sale.FilterSaleRequest;
 import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
 import com.bloom.app.api.dto.request.stockadjustment.CreateStockAdjustmentRequest;
 import com.bloom.app.api.dto.request.stockadjustment.StockAdjustmentItemRequest;
@@ -170,7 +171,7 @@ class PostgreSqlMigrationAndContextTest {
 
     @Test
     void appliesAllMigrationsAndRemovesOnlySupersededContracts() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("21");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("22");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
             SELECT sku, stock_store, stock_warehouse,
@@ -276,6 +277,8 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(constraintExists(
             "sales", "uq_sales_checkout_idempotency_key")).isTrue();
         assertThat(constraintExists(
+            "sales", "chk_sales_payment_settlement")).isTrue();
+        assertThat(constraintExists(
             "stock_transfers", "uq_stock_transfers_request_key")).isTrue();
         assertThat(constraintExists(
             "item_category_counters", "chk_item_category_counters_sequence_nonnegative")).isTrue();
@@ -286,6 +289,8 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(constraintExists(
             "goods_receipt_items", "chk_goods_receipt_items_location")).isTrue();
         assertThat(indexExists("idx_sales_cash_session_id")).isTrue();
+        assertThat(triggerExists("sales", "trg_sales_immutable")).isTrue();
+        assertThat(triggerExists("sale_items", "trg_sale_items_immutable")).isTrue();
 
         assertThat(foreignKeyDeleteRule("items", "fk_item_category")).isEqualTo("RESTRICT");
         assertThat(foreignKeyDeleteRule("sale_items", "fk_sale_items_sale")).isEqualTo("RESTRICT");
@@ -343,6 +348,132 @@ class PostgreSqlMigrationAndContextTest {
                       CURRENT_TIMESTAMP, 'STORE', 0.0000, 2.0000)
             """))
             .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void databaseRejectsInvalidPaymentFactsAndRecordedSaleMutation() {
+        closeAnyOpenCashSession();
+        Long sessionId = jdbcTemplate.queryForObject("""
+            INSERT INTO cash_sessions (
+                opened_by_id, opening_cash, expected_closing_cash,
+                status, opened_at, version
+            ) VALUES (1, 100.0000, 100.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
+            RETURNING id
+            """, Long.class);
+        String suffix = UUID.randomUUID().toString();
+
+        try {
+            assertThatThrownBy(() -> jdbcTemplate.update("""
+                INSERT INTO sales (
+                    code, subtotal_amount, discount_amount, total_amount,
+                    paid_amount, change_amount, payment_type, cash_session_id,
+                    checkout_idempotency_key, checkout_request_hash, created_at
+                ) VALUES (?, 100.0000, 0.0000, 100.0000,
+                    5.0000, 0.0000, 'CASH', ?, ?, REPEAT('a', 64), CURRENT_TIMESTAMP)
+                """, "INVALID-CASH-" + suffix, sessionId, "invalid-cash-" + suffix))
+                .isInstanceOf(DataAccessException.class);
+
+            assertThatThrownBy(() -> jdbcTemplate.update("""
+                INSERT INTO sales (
+                    code, subtotal_amount, discount_amount, total_amount,
+                    paid_amount, change_amount, payment_type, cash_session_id,
+                    checkout_idempotency_key, checkout_request_hash, created_at
+                ) VALUES (?, 100.0000, 0.0000, 100.0000,
+                    500.0000, 400.0000, 'QRIS', ?, ?, REPEAT('b', 64), CURRENT_TIMESTAMP)
+                """, "INVALID-QRIS-" + suffix, sessionId, "invalid-qris-" + suffix))
+                .isInstanceOf(DataAccessException.class);
+
+            Long saleId = jdbcTemplate.queryForObject("""
+                INSERT INTO sales (
+                    code, subtotal_amount, discount_amount, total_amount,
+                    paid_amount, change_amount, payment_type, cash_session_id,
+                    checkout_idempotency_key, checkout_request_hash, created_at
+                ) VALUES (?, 100.0000, 0.0000, 100.0000,
+                    120.0000, 20.0000, 'CASH', ?, ?, REPEAT('c', 64), CURRENT_TIMESTAMP)
+                RETURNING id
+                """, Long.class, "IMMUTABLE-SALE-" + suffix, sessionId,
+                "immutable-sale-" + suffix);
+            Long saleItemId = jdbcTemplate.queryForObject("""
+                INSERT INTO sale_items (
+                    sale_id, item_id, quantity, unit_price, subtotal, stock_location
+                ) VALUES (?, 1, 1.0000, 100.0000, 100.0000, 'STORE')
+                RETURNING id
+                """, Long.class, saleId);
+
+            assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE sales SET description = 'changed' WHERE id = ?", saleId))
+                .isInstanceOf(DataAccessException.class);
+            assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE sale_items SET unit_price = 50.0000 WHERE id = ?", saleItemId))
+                .isInstanceOf(DataAccessException.class);
+            assertThatThrownBy(() -> jdbcTemplate.update(
+                "DELETE FROM sale_items WHERE id = ?", saleItemId))
+                .isInstanceOf(DataAccessException.class);
+            assertThatThrownBy(() -> jdbcTemplate.update(
+                "DELETE FROM sales WHERE id = ?", saleId))
+                .isInstanceOf(DataAccessException.class);
+
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sales WHERE id = ?", Long.class, saleId)).isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sale_items WHERE id = ?", Long.class, saleItemId))
+                .isEqualTo(1L);
+        } finally {
+            closeAnyOpenCashSession();
+        }
+    }
+
+    @Test
+    void saleHistoryAndDetailUseBoundedQueriesAndMinimalItemProjection() {
+        closeAnyOpenCashSession();
+        jdbcTemplate.update("""
+            INSERT INTO cash_sessions (
+                opened_by_id, opening_cash, expected_closing_cash,
+                status, opened_at, version
+            ) VALUES (1, 100.0000, 100.0000, 'OPEN', CURRENT_TIMESTAMP, 0)
+            """);
+        Long itemId = insertInventoryItem("SALE-READ", new BigDecimal("2.0000"));
+        Item item = itemRepository.findById(itemId).orElseThrow();
+        CreateSaleRequest request = CreateSaleRequest.builder()
+            .paidAmount(new BigDecimal("10.0000"))
+            .discountAmount(BigDecimal.ZERO)
+            .paymentType(PaymentType.QRIS)
+            .saleItemList(List.of(saleLine(item.getSku(), "1.0000")))
+            .build();
+
+        try {
+            SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("admin", "ignored", List.of()));
+            SaleResponse created = saleService.createSale(
+                "sale-read-" + UUID.randomUUID(), request);
+            Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+
+            statistics.clear();
+            Page<SaleResponse> history = saleService.filterSales(
+                FilterSaleRequest.builder().code(created.getCode()).build(),
+                PageRequest.of(0, 10)
+            );
+
+            assertThat(history.getContent()).singleElement().satisfies(sale -> {
+                assertThat(sale.getCode()).isEqualTo(created.getCode());
+                assertThat(sale.getSaleItems()).singleElement().satisfies(line -> {
+                    assertThat(line.getItem().getSku()).isEqualTo(item.getSku());
+                    assertThat(line.getItem().getName()).isEqualTo(item.getName());
+                    assertThat(line.getItem().getBaseUnitOfMeasure()).isEqualTo(UnitOfMeasure.PIECE);
+                    assertThat(line.getUnitPrice()).isEqualByComparingTo("10.0000");
+                });
+            });
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(2L);
+
+            statistics.clear();
+            SaleResponse detail = saleService.getSaleDetails(created.getCode());
+            assertThat(detail.getSaleItems()).singleElement().satisfies(line ->
+                assertThat(line.getItem().getSku()).isEqualTo(item.getSku()));
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(1L);
+        } finally {
+            SecurityContextHolder.clearContext();
+            closeAnyOpenCashSession();
+        }
     }
 
     @Test
@@ -1213,6 +1344,27 @@ class PostgreSqlMigrationAndContextTest {
             Boolean.class,
             tableName,
             constraintName
+        );
+        return Boolean.TRUE.equals(exists);
+    }
+
+    private boolean triggerExists(String tableName, String triggerName) {
+        Boolean exists = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_trigger database_trigger
+                JOIN pg_class relation ON relation.oid = database_trigger.tgrelid
+                JOIN pg_namespace schema_name ON schema_name.oid = relation.relnamespace
+                WHERE schema_name.nspname = 'public'
+                  AND relation.relname = ?
+                  AND database_trigger.tgname = ?
+                  AND NOT database_trigger.tgisinternal
+            )
+            """,
+            Boolean.class,
+            tableName,
+            triggerName
         );
         return Boolean.TRUE.equals(exists);
     }

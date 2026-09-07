@@ -13,6 +13,7 @@ import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.CheckoutIdempotencyConflictException;
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.CashSession;
 import com.bloom.app.domain.model.Sale;
@@ -443,7 +444,7 @@ class SaleServiceImplTest {
     }
 
     @Test
-    void detailUsesTheFullyFetchedReadModelAndKeepsMissingDetailError() {
+    void detailUsesTheFullyFetchedReadModelAndReturnsNotFoundForMissingSale() {
         Sale sale = Sale.builder().id(20L).code("SALE-20").build();
         SaleResponse response = SaleResponse.builder().code("SALE-20").build();
         when(saleRepository.findReadModelByCode("SALE-20")).thenReturn(Optional.of(sale));
@@ -451,8 +452,23 @@ class SaleServiceImplTest {
 
         assertThat(service.getSaleDetails("SALE-20")).isSameAs(response);
         assertThatThrownBy(() -> service.getSaleDetails("MISSING"))
-            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class)
-            .hasMessageContaining("Sales not found");
+            .isInstanceOf(ResourceNotFoundException.class)
+            .hasMessage(ErrorCode.SALE_NOT_FOUND.getMessage());
+    }
+
+    @Test
+    void reportsAUsefulInvariantErrorIfABatchedSaleDisappears() {
+        FilterSaleRequest filter = FilterSaleRequest.builder().build();
+        Sale pageSale = Sale.builder().id(20L).code("SALE-20").build();
+        when(saleRepository.findAll(
+                org.mockito.ArgumentMatchers.<org.springframework.data.jpa.domain.Specification<Sale>>any(),
+                any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(pageSale), PageRequest.of(0, 10), 1));
+        when(saleRepository.findReadModelsByIdIn(List.of(20L))).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.filterSales(filter, PageRequest.of(0, 10)))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("Sale disappeared during read: 20");
     }
 
     private CreateSaleRequest saleRequest(

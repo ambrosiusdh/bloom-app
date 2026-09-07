@@ -52,6 +52,10 @@ Repository names are used where they already exist: `Item`, `Sale`, `SaleItem`, 
 
 Flyway is the only component allowed to create, alter, or drop PostgreSQL schema objects. Every implementation change to a mapped table, column, constraint, index, or data migration must be represented by an ordered Flyway migration.
 
+Operators deploying the Release 1 cleanup must follow
+[`docs/operations/v21-release-1-contract-cleanup.md`](../operations/v21-release-1-contract-cleanup.md)
+before applying V21.
+
 Once the schema and mappings are aligned, all environments must use:
 
 ```properties
@@ -446,7 +450,8 @@ void, cancellation, refund, or item-return mutation. `NONE` explicitly means no 
 return correction exists for the sale. A future correction status requires an implemented,
 auditable domain operation; persisted audit facts; defined stock and payment reversal semantics;
 and separately approved frontend mutation scope. This contract does not claim that such operations
-exist.
+exist. Migration V22 enforces that boundary at the database layer by rejecting updates and deletes
+of recorded `sales` and `sale_items` rows.
 
 The stable `SaleResponse` fields are `code`, `sessionId`, `saleStatus`, `paymentStatus`,
 `correctionStatus`, `subtotalAmount`, `discountAmount`, `totalAmount`, `paidAmount`,
@@ -461,17 +466,19 @@ and `saleItems`. The financial meanings remain:
 
 Each `SaleItemResponse` contains `item`, `stockLocation`, `quantity`, `unitPrice`, and `subtotal`.
 The decimal `quantity`, `unitPrice`, and `subtotal`, plus `stockLocation`, come from the persisted
-sale line. Historical financial display must use those persisted line amounts, never the nested live
-`Item.price`. The nested item projection supplies SKU, name, and `baseUnitOfMeasure`; mutable item
-master display data is not a historical snapshot and can change after checkout.
+sale line. The nested, sale-specific item projection contains only SKU, name, and
+`baseUnitOfMeasure`; it deliberately does not expose current price, stock, category, active state,
+or other mutable item-master fields. The name is still live display data rather than a historical
+snapshot, so historical financial display and reconciliation must use the persisted sale-line facts.
 
 The list supports only `code`, `createdBy`, `startDate`, `endDate`, `page`, and `size`. `code` and
-`createdBy` are case-insensitive contains filters. `startDate` and `endDate` are inclusive, and a
+`createdBy` are trimmed, case-insensitive contains filters; `%` and `_` are treated as literal input,
+not SQL wildcard syntax. `startDate` and `endDate` are inclusive, and a
 range whose start is after its end is invalid. Filtering occurs before paging. Request page numbers
 follow `PagingHelper` (page 1 is the first page, with omitted/zero also resolving to the first page),
 while Spring `Page` response metadata is zero-based. Results are always ordered by `createdAt DESC`
 then `id DESC`; client sorting is not part of this Release 1 endpoint contract. No matches return
-HTTP 200 with an empty page.
+HTTP 200 with an empty page. A missing detail code returns HTTP 404.
 
 Paged reads first select the correctly filtered and ordered sale IDs, then fetch those sales with
 their cash session, lines, and each line's item in one batched read-model query. Detail and checkout

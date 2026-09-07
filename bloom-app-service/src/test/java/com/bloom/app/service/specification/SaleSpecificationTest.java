@@ -26,8 +26,8 @@ class SaleSpecificationTest {
         Instant start = Instant.parse("2026-08-01T00:00:00Z");
         Instant end = Instant.parse("2026-08-31T23:59:59Z");
         FilterSaleRequest request = FilterSaleRequest.builder()
-            .code("SaLe-20")
-            .createdBy("AdMiN")
+            .code("  SaLe_20%  ")
+            .createdBy("  AdMiN  ")
             .startDate(start)
             .endDate(end)
             .build();
@@ -51,9 +51,15 @@ class SaleSpecificationTest {
         Specification<Sale> specification = SaleSpecification.filter(request);
         assertThat(specification.toPredicate(root, query, builder)).isSameAs(combined);
 
-        verify(builder).like(lowerCode, "%sale-20%");
-        verify(builder).like(lowerCreatedBy, "%admin%");
+        verify(builder).like(lowerCode, "%sale\\_20\\%%", '\\');
+        verify(builder).like(lowerCreatedBy, "%admin%", '\\');
         verify(builder).greaterThanOrEqualTo(createdAt, start);
         verify(builder).lessThanOrEqualTo(createdAt, end);
+    }
+
+    @Test
+    void escapesLikeWildcardsForLiteralContainsSearch() {
+        assertThat(SaleSpecification.escapeLike("sale_50%\\final"))
+            .isEqualTo("sale\\_50\\%\\\\final");
     }
 }

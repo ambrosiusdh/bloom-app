@@ -45,7 +45,6 @@ class SaleMapperTest {
             assertThat(line.getItem().getSku()).isEqualTo("ITEM-1");
             assertThat(line.getItem().getName()).isEqualTo("Kain meteran");
             assertThat(line.getItem().getBaseUnitOfMeasure()).isEqualTo(UnitOfMeasure.METER);
-            assertThat(line.getItem().getPrice()).isEqualByComparingTo("99.0000");
         });
     }
 

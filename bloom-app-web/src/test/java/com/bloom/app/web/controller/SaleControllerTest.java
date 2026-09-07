@@ -1,8 +1,8 @@
 package com.bloom.app.web.controller;
 
-import com.bloom.app.api.dto.response.item.ItemResponse;
 import com.bloom.app.api.dto.response.sale.SaleCheckoutStatusResponse;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
+import com.bloom.app.api.dto.response.saleitem.SaleItemProductResponse;
 import com.bloom.app.api.dto.response.saleitem.SaleItemResponse;
 import com.bloom.app.api.exception.GlobalExceptionHandler;
 import com.bloom.app.domain.enums.PaymentType;
@@ -27,8 +27,6 @@ import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.MethodValidationInterceptor;
-import org.springframework.web.server.ResponseStatusException;
-import org.springframework.http.HttpStatus;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -164,6 +162,9 @@ class SaleControllerTest {
             .andExpect(jsonPath("$.data.sale.saleItems[0].item.sku").value("ITEM-1"))
             .andExpect(jsonPath("$.data.sale.saleItems[0].item.name").value("Fractional item"))
             .andExpect(jsonPath("$.data.sale.saleItems[0].item.baseUnitOfMeasure").value("METER"))
+            .andExpect(jsonPath("$.data.sale.saleItems[0].item.price").doesNotExist())
+            .andExpect(jsonPath("$.data.sale.saleItems[0].item.stockStore").doesNotExist())
+            .andExpect(jsonPath("$.data.sale.saleItems[0].item.category").doesNotExist())
             .andExpect(jsonPath("$.data.sale.saleItems[0].stockLocation").value("WAREHOUSE"))
             .andExpect(jsonPath("$.data.sale.saleItems[0].quantity").value(1.25))
             .andExpect(jsonPath("$.data.sale.saleItems[0].unitPrice").value(10.0))
@@ -271,7 +272,7 @@ class SaleControllerTest {
             .thenThrow(new IllegalArgumentException(
                 "startDate must be before or equal to endDate"));
         when(saleService.getSaleDetails("MISSING"))
-            .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sales not found"));
+            .thenThrow(new ResourceNotFoundException("Transaksi tidak ditemukan"));
 
         mockMvc.perform(get("/api/sales")
                 .param("startDate", "2026-09-01T00:00:00Z")
@@ -282,10 +283,10 @@ class SaleControllerTest {
             .andExpect(jsonPath("$.errorType").value("IllegalArgumentException"));
 
         mockMvc.perform(get("/api/sales/details").param("code", "MISSING"))
-            .andExpect(status().isBadRequest())
+            .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.success").value(false))
-            .andExpect(jsonPath("$.code").value(400))
-            .andExpect(jsonPath("$.errorType").value("ResponseStatusException"));
+            .andExpect(jsonPath("$.code").value(404))
+            .andExpect(jsonPath("$.errorType").value("ResourceNotFoundException"));
     }
 
     @Test
@@ -348,7 +349,7 @@ class SaleControllerTest {
             .createdBy("admin")
             .updatedBy("admin")
             .saleItems(List.of(SaleItemResponse.builder()
-                .item(ItemResponse.builder()
+                .item(SaleItemProductResponse.builder()
                     .sku("ITEM-1")
                     .name("Fractional item")
                     .baseUnitOfMeasure(UnitOfMeasure.METER)

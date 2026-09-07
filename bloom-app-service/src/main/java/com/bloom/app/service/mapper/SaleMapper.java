@@ -14,6 +14,8 @@ import org.mapstruct.NullValuePropertyMappingStrategy;
     uses = SaleItemMapper.class
 )
 public interface SaleMapper {
+    // Release 1 persists only fully settled sales and has no sale correction mutation.
+    // When that domain boundary changes, these constants must be replaced by persisted facts.
     @Mapping(target = "saleItems", source = "items")
     @Mapping(target = "sessionId", source = "cashSession.id")
     @Mapping(target = "saleStatus", expression = "java(com.bloom.app.domain.enums.SaleStatus.COMPLETED)")
