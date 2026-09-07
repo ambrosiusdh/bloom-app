@@ -169,11 +169,11 @@ class PostgreSqlMigrationAndContextTest {
     }
 
     @Test
-    void appliesAllMigrationsAndBackfillsBaselineStockIntoStore() {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("20");
+    void appliesAllMigrationsAndRemovesOnlySupersededContracts() {
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("21");
 
         List<Map<String, Object>> stockRows = jdbcTemplate.queryForList("""
-            SELECT sku, stock_quantity, stock_store, stock_warehouse,
+            SELECT sku, stock_store, stock_warehouse,
                    base_unit_of_measure, fractional_quantity_allowed
             FROM items
             WHERE id BETWEEN 1 AND 6
@@ -181,10 +181,18 @@ class PostgreSqlMigrationAndContextTest {
             """);
 
         assertThat(stockRows).hasSize(6);
+        assertThat(stockRows)
+            .extracting(row -> (BigDecimal) row.get("stock_store"))
+            .containsExactly(
+                new BigDecimal("50.0000"),
+                new BigDecimal("400.0000"),
+                new BigDecimal("0.0000"),
+                new BigDecimal("10.0000"),
+                new BigDecimal("30.0000"),
+                new BigDecimal("10.0000")
+            );
         assertThat(stockRows).allSatisfy(row -> {
-            assertThat((BigDecimal) row.get("stock_store")).isEqualByComparingTo((BigDecimal) row.get("stock_quantity"));
             assertThat((BigDecimal) row.get("stock_store")).hasScaleOf(4);
-            assertThat((BigDecimal) row.get("stock_quantity")).hasScaleOf(4);
             assertThat((BigDecimal) row.get("stock_warehouse")).isEqualByComparingTo("0.0000");
             assertThat(row.get("base_unit_of_measure")).isEqualTo("PIECE");
             assertThat(row.get("fractional_quantity_allowed")).isEqualTo(false);
@@ -195,13 +203,15 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(columnExists("stock_movements", "reference_no")).isTrue();
         assertThat(columnExists("stock_movements", "adjustment_action_type")).isTrue();
         assertThat(columnIsNullable("stock_movements", "reference_no")).isFalse();
-        assertThat(columnExists("items", "stock_quantity")).isTrue();
+        assertThat(columnExists("items", "stock_quantity")).isFalse();
         assertThat(tableExists("suppliers")).isTrue();
         assertThat(columnExists("suppliers", "active")).isTrue();
         assertThat(columnExists("goods_receipts", "create_idempotency_key")).isTrue();
         assertThat(columnExists("goods_receipts", "create_request_hash")).isTrue();
         assertThat(columnExists("goods_receipts", "status")).isTrue();
         assertThat(columnExists("goods_receipts", "cancellation_reason")).isTrue();
+        assertThat(columnExists("goods_receipts", "supplier_name")).isFalse();
+        assertThat(columnExists("goods_receipts", "supplier_name_snapshot")).isTrue();
         assertThat(columnExists("goods_receipt_items", "base_unit_of_measure")).isTrue();
         assertThat(columnExists("goods_receipt_items", "line_total")).isTrue();
         assertThat(tableExists("cash_sessions")).isTrue();
@@ -261,7 +271,26 @@ class PostgreSqlMigrationAndContextTest {
             "supplier_payments", "uq_supplier_payments_idempotency_key")).isTrue();
         assertThat(constraintExists(
             "expenses", "uq_expenses_create_idempotency_key")).isTrue();
+        assertThat(constraintExists(
+            "goods_receipts", "uq_goods_receipts_create_idempotency_key")).isTrue();
+        assertThat(constraintExists(
+            "sales", "uq_sales_checkout_idempotency_key")).isTrue();
+        assertThat(constraintExists(
+            "stock_transfers", "uq_stock_transfers_request_key")).isTrue();
+        assertThat(constraintExists(
+            "item_category_counters", "chk_item_category_counters_sequence_nonnegative")).isTrue();
+        assertThat(constraintExists(
+            "sale_items", "chk_sale_items_location")).isTrue();
+        assertThat(constraintExists(
+            "stock_adjustment_items", "chk_stock_adjustment_items_location")).isTrue();
+        assertThat(constraintExists(
+            "goods_receipt_items", "chk_goods_receipt_items_location")).isTrue();
         assertThat(indexExists("idx_sales_cash_session_id")).isTrue();
+
+        assertThat(foreignKeyDeleteRule("items", "fk_item_category")).isEqualTo("RESTRICT");
+        assertThat(foreignKeyDeleteRule("sale_items", "fk_sale_items_sale")).isEqualTo("RESTRICT");
+        assertThat(foreignKeyDeleteRule(
+            "goods_receipt_items", "fk_goods_receipt_items_receipt")).isEqualTo("RESTRICT");
 
         assertThat(numericScale("items", "price")).isEqualTo(4);
         assertThat(numericScale("sales", "subtotal_amount")).isEqualTo(4);
@@ -282,7 +311,6 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(numericScale("cash_sessions", "difference")).isEqualTo(4);
         assertThat(numericScale("cash_movements", "amount")).isEqualTo(4);
         assertThat(numericScale("expenses", "amount")).isEqualTo(4);
-        assertThat(numericScale("items", "stock_quantity")).isEqualTo(4);
         assertThat(numericScale("items", "stock_store")).isEqualTo(4);
         assertThat(numericScale("items", "stock_warehouse")).isEqualTo(4);
         assertThat(numericScale("sale_items", "quantity")).isEqualTo(4);
@@ -294,6 +322,10 @@ class PostgreSqlMigrationAndContextTest {
         assertThat(numericScale("stock_movements", "qty_before")).isEqualTo(4);
         assertThat(numericScale("stock_movements", "qty_after")).isEqualTo(4);
         assertThat(numericScale("stock_transfer_lines", "quantity")).isEqualTo(4);
+        assertThat(numericPrecision("items", "price")).isEqualTo(19);
+        assertThat(numericPrecision("sales", "total_amount")).isEqualTo(19);
+        assertThat(numericPrecision("goods_receipts", "total_amount")).isEqualTo(19);
+        assertThat(numericPrecision("supplier_payments", "amount")).isEqualTo(19);
         assertThat(columnExists("stock_transfer_lines", "item_sku")).isTrue();
         assertThat(columnExists("stock_transfer_lines", "item_name")).isTrue();
         assertThat(columnExists("stock_transfer_lines", "unit_of_measure")).isTrue();
@@ -365,7 +397,7 @@ class PostgreSqlMigrationAndContextTest {
 
         jdbcTemplate.update("""
             INSERT INTO goods_receipts (
-                code, received_date, supplier_name, description, created_at, created_by,
+                code, received_date, supplier_name_snapshot, description, created_at, created_by,
                 supplier_id, total_amount, create_idempotency_key,
                 create_request_hash, status, version
             ) VALUES (?, CURRENT_TIMESTAMP, ?, NULL, CURRENT_TIMESTAMP, 'test', ?, 10.0000,
@@ -1097,6 +1129,42 @@ class PostgreSqlMigrationAndContextTest {
         return scale == null ? -1 : scale;
     }
 
+    private int numericPrecision(String tableName, String columnName) {
+        Integer precision = jdbcTemplate.queryForObject(
+            """
+            SELECT numeric_precision
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = ?
+              AND column_name = ?
+            """,
+            Integer.class,
+            tableName,
+            columnName
+        );
+        return precision == null ? -1 : precision;
+    }
+
+    private String foreignKeyDeleteRule(String tableName, String constraintName) {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT rc.delete_rule
+            FROM information_schema.referential_constraints rc
+            WHERE rc.constraint_schema = 'public'
+              AND rc.constraint_name = ?
+              AND rc.constraint_name IN (
+                  SELECT tc.constraint_name
+                  FROM information_schema.table_constraints tc
+                  WHERE tc.table_schema = 'public'
+                    AND tc.table_name = ?
+              )
+            """,
+            String.class,
+            constraintName,
+            tableName
+        );
+    }
+
     private boolean columnIsNullable(String tableName, String columnName) {
         String nullable = jdbcTemplate.queryForObject(
             """
@@ -1163,16 +1231,15 @@ class PostgreSqlMigrationAndContextTest {
         return jdbcTemplate.queryForObject(
             """
             INSERT INTO items (
-                name, sku, price, stock_quantity, stock_store, stock_warehouse,
+                name, sku, price, stock_store, stock_warehouse,
                 base_unit_of_measure, fractional_quantity_allowed, active,
                 item_category_id, version
-            ) VALUES (?, ?, 10.0000, ?, ?, 0.0000, 'PIECE', TRUE, TRUE, 1, 0)
+            ) VALUES (?, ?, 10.0000, ?, 0.0000, 'PIECE', TRUE, TRUE, 1, 0)
             RETURNING id
             """,
             Long.class,
             purpose + " test item",
             purpose + "-" + UUID.randomUUID(),
-            storeStock,
             storeStock
         );
     }

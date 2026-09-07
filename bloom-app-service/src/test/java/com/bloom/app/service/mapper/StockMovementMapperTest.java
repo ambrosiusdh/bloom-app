@@ -1,6 +1,5 @@
 package com.bloom.app.service.mapper;
 
-import com.bloom.app.api.dto.response.auditlog.ItemAuditLogResponse;
 import com.bloom.app.api.dto.response.stockmovement.StockMovementResponse;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
@@ -67,13 +66,11 @@ class StockMovementMapperTest {
         assertThat(response.getReferenceNo()).isEqualTo("SA-0099");
         assertThat(response.getAdjustmentActionType()).isEqualTo(StockAdjustmentActionType.ADD);
 
-        ItemAuditLogResponse auditResponse = mapper.toAuditResponse(response);
-        assertThat(auditResponse.getId()).isEqualTo(42L);
-        assertThat(auditResponse.getItem().getSku()).isEqualTo("SKU-7");
-        assertThat(auditResponse.getSource()).isEqualTo(MovementSourceType.STOCK_ADJUSTMENT);
-        assertThat(auditResponse.getQty()).isEqualByComparingTo("1.2500");
-        assertThat(auditResponse.getQtyBefore()).isEqualByComparingTo("0.5000");
-        assertThat(auditResponse.getQtyAfter()).isEqualByComparingTo("1.7500");
-        assertThat(auditResponse.getCreatedDate()).isEqualTo(createdAt);
+        assertThat(response.getId()).isEqualTo(42L);
+        assertThat(response.getSourceType()).isEqualTo(MovementSourceType.STOCK_ADJUSTMENT);
+        assertThat(response.getQuantity()).isEqualByComparingTo("1.2500");
+        assertThat(response.getQtyBefore()).isEqualByComparingTo("0.5000");
+        assertThat(response.getQtyAfter()).isEqualByComparingTo("1.7500");
+        assertThat(response.getCreatedAt()).isEqualTo(createdAt);
     }
 }

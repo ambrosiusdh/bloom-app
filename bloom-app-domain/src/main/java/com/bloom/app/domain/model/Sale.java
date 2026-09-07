@@ -39,16 +39,16 @@ public class Sale {
     @Column(nullable = false, unique = true)
     private String code;
 
-    @Column(precision = 19, scale = 4)
+    @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal subtotalAmount;
 
-    @Column(precision = 19, scale = 4)
+    @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal discountAmount;
 
-    @Column(precision = 19, scale = 4)
+    @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal totalAmount;
 
-    @Column(precision = 19, scale = 4)
+    @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal paidAmount;
 
     @Column(nullable = false, precision = 19, scale = 4)

@@ -134,7 +134,7 @@ The public item list and detail responses expose the same inventory state: `acti
 
 `hasStockMovements` is true when at least one `StockMovement` exists for the item. Both lock fields are true exactly when `hasStockMovements` is true, because both measurement rules become immutable at the first movement. The separate lock fields are retained so clients consume explicit server policy rather than infer it from balances or assume both policies will always evolve together.
 
-`stockStore` and `stockWarehouse` are independent quantities. Clients must not merge them. The legacy `stockQuantity` response field is retained temporarily only for compatibility and is deprecated in the API schema. New and migrated clients must use `stockStore` and `stockWarehouse`; `stockQuantity` is not authoritative for the item inventory read model and will be removed in a later compatibility cleanup.
+`stockStore` and `stockWarehouse` are independent quantities. Clients must not merge them. The legacy `stockQuantity` response field was temporary compatibility only and was removed in the Release 1 destructive-contract cleanup. Clients must use `stockStore` and `stockWarehouse`; no aggregate inventory response field is authoritative.
 
 ### Stock authority
 

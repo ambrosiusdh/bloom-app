@@ -46,13 +46,14 @@ public class Item {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(nullable = false)
     private String name;
 
     @Column(unique = true, nullable = false)
     private String sku;
 
     private String description;
-    @Column(precision = 19, scale = 4)
+    @Column(nullable = false, precision = 19, scale = 4)
     private BigDecimal price;
 
     @Enumerated(EnumType.STRING)

@@ -830,10 +830,10 @@ class SupplierPaymentPostgreSqlIntegrationTest {
         Long id = jdbcTemplate.queryForObject(
             """
             INSERT INTO items (
-                name, sku, price, stock_quantity, stock_store, stock_warehouse,
+                name, sku, price, stock_store, stock_warehouse,
                 base_unit_of_measure, fractional_quantity_allowed, active,
                 item_category_id, version
-            ) VALUES (?, ?, 100.0000, 0.0000, 0.0000, 0.0000,
+            ) VALUES (?, ?, 100.0000, 0.0000, 0.0000,
                       'PIECE', FALSE, TRUE, ?, 0)
             RETURNING id
             """,

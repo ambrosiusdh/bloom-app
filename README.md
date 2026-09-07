@@ -11,8 +11,9 @@ erDiagram
     ITEM {
         BIGINT id PK
         VARCHAR name
-        DECIMAL price
-        INT stock_quantity
+        NUMERIC(19,4) price
+        NUMERIC(19,4) stock_store
+        NUMERIC(19,4) stock_warehouse
     }
 
     SALE {
