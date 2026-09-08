@@ -2,6 +2,9 @@ package com.bloom.app.api.dto.response.sale;
 
 import com.bloom.app.api.dto.response.saleitem.SaleItemResponse;
 import com.bloom.app.domain.enums.PaymentType;
+import com.bloom.app.domain.enums.SaleCorrectionStatus;
+import com.bloom.app.domain.enums.SalePaymentStatus;
+import com.bloom.app.domain.enums.SaleStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,6 +21,9 @@ import java.util.List;
 public class SaleResponse {
     private String code;
     private Long sessionId;
+    private SaleStatus saleStatus;
+    private SalePaymentStatus paymentStatus;
+    private SaleCorrectionStatus correctionStatus;
     private BigDecimal subtotalAmount;
     private BigDecimal discountAmount;
     private BigDecimal totalAmount;

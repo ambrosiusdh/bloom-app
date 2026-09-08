@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -30,6 +31,14 @@ public interface SaleRepository extends JpaRepository<Sale, Long>, JpaSpecificat
     List<Sale> findByCreatedAtBetween(Instant startDate, Instant endDate);
 
     Optional<Sale> findByCode(String code);
+
+    @EntityGraph(attributePaths = {"cashSession", "items", "items.item"})
+    @Query("SELECT s FROM Sale s WHERE s.code = :code")
+    Optional<Sale> findReadModelByCode(@Param("code") String code);
+
+    @EntityGraph(attributePaths = {"cashSession", "items", "items.item"})
+    @Query("SELECT DISTINCT s FROM Sale s WHERE s.id IN :ids")
+    List<Sale> findReadModelsByIdIn(@Param("ids") Collection<Long> ids);
 
     @Query("SELECT c.name as name, SUM(si.subtotal) as total " +
             "FROM Sale s " +

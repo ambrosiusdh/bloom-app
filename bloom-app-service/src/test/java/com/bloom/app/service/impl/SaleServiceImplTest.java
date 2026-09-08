@@ -1,6 +1,7 @@
 package com.bloom.app.service.impl;
 
 import com.bloom.app.api.dto.request.sale.CreateSaleRequest;
+import com.bloom.app.api.dto.request.sale.FilterSaleRequest;
 import com.bloom.app.api.dto.request.saleitem.CreateSaleItemRequest;
 import com.bloom.app.api.dto.response.sale.SaleCheckoutStatusResponse;
 import com.bloom.app.api.dto.response.sale.SaleResponse;
@@ -12,6 +13,7 @@ import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.CheckoutIdempotencyConflictException;
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.CashSession;
 import com.bloom.app.domain.model.Sale;
@@ -26,8 +28,14 @@ import com.bloom.app.service.mapper.SaleMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.mockito.InOrder;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -36,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -368,6 +377,98 @@ class SaleServiceImplTest {
 
         assertThat(sale.getItems()).hasSize(2);
         verify(itemRepository).findBySkuInOrderByIdForUpdate(List.of("ITEM-2", "ITEM-1"));
+    }
+
+    @Test
+    void filtersBeforePagingUsesStableNewestFirstOrderAndBatchLoadsReadModels() {
+        FilterSaleRequest filter = FilterSaleRequest.builder()
+            .code("sale")
+            .createdBy("admin")
+            .startDate(Instant.parse("2026-08-01T00:00:00Z"))
+            .endDate(Instant.parse("2026-08-31T23:59:59Z"))
+            .build();
+        Sale newest = Sale.builder().id(20L).code("SALE-20").build();
+        Sale older = Sale.builder().id(10L).code("SALE-10").build();
+        SaleResponse newestResponse = SaleResponse.builder().code("SALE-20").build();
+        SaleResponse olderResponse = SaleResponse.builder().code("SALE-10").build();
+        when(saleRepository.findAll(
+                org.mockito.ArgumentMatchers.<org.springframework.data.jpa.domain.Specification<Sale>>any(),
+                any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(newest, older), PageRequest.of(1, 2), 7));
+        when(saleRepository.findReadModelsByIdIn(List.of(20L, 10L)))
+            .thenReturn(List.of(older, newest));
+        when(saleMapper.saleToResponse(newest)).thenReturn(newestResponse);
+        when(saleMapper.saleToResponse(older)).thenReturn(olderResponse);
+
+        Page<SaleResponse> result = service.filterSales(filter, PageRequest.of(1, 2));
+
+        assertThat(result.getContent()).containsExactly(newestResponse, olderResponse);
+        assertThat(result.getNumber()).isEqualTo(1);
+        assertThat(result.getTotalElements()).isEqualTo(7);
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        verify(saleRepository).findAll(
+            org.mockito.ArgumentMatchers.<org.springframework.data.jpa.domain.Specification<Sale>>any(),
+            pageableCaptor.capture());
+        assertThat(pageableCaptor.getValue().getSort().toString())
+            .isEqualTo("createdAt: DESC,id: DESC");
+        verify(saleRepository).findReadModelsByIdIn(List.of(20L, 10L));
+    }
+
+    @Test
+    void emptyFilteredPageReturnsSuccessfullyWithoutRelationshipFetches() {
+        FilterSaleRequest filter = FilterSaleRequest.builder().code("missing").build();
+        when(saleRepository.findAll(
+                org.mockito.ArgumentMatchers.<org.springframework.data.jpa.domain.Specification<Sale>>any(),
+                any(Pageable.class)))
+            .thenReturn(Page.empty(PageRequest.of(0, 10)));
+
+        Page<SaleResponse> result = service.filterSales(filter, PageRequest.of(0, 10));
+
+        assertThat(result).isEmpty();
+        assertThat(result.getNumber()).isZero();
+        verify(saleRepository, never()).findReadModelsByIdIn(any());
+        verifyNoInteractions(saleMapper);
+    }
+
+    @Test
+    void rejectsInvertedDateRangeBeforeQuerying() {
+        FilterSaleRequest invalid = FilterSaleRequest.builder()
+            .startDate(Instant.parse("2026-09-01T00:00:00Z"))
+            .endDate(Instant.parse("2026-08-01T00:00:00Z"))
+            .build();
+
+        assertThatThrownBy(() -> service.filterSales(invalid, PageRequest.of(0, 10)))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("startDate must be before or equal to endDate");
+        verifyNoInteractions(saleRepository);
+    }
+
+    @Test
+    void detailUsesTheFullyFetchedReadModelAndReturnsNotFoundForMissingSale() {
+        Sale sale = Sale.builder().id(20L).code("SALE-20").build();
+        SaleResponse response = SaleResponse.builder().code("SALE-20").build();
+        when(saleRepository.findReadModelByCode("SALE-20")).thenReturn(Optional.of(sale));
+        when(saleMapper.saleToResponse(sale)).thenReturn(response);
+
+        assertThat(service.getSaleDetails("SALE-20")).isSameAs(response);
+        assertThatThrownBy(() -> service.getSaleDetails("MISSING"))
+            .isInstanceOf(ResourceNotFoundException.class)
+            .hasMessage(ErrorCode.SALE_NOT_FOUND.getMessage());
+    }
+
+    @Test
+    void reportsAUsefulInvariantErrorIfABatchedSaleDisappears() {
+        FilterSaleRequest filter = FilterSaleRequest.builder().build();
+        Sale pageSale = Sale.builder().id(20L).code("SALE-20").build();
+        when(saleRepository.findAll(
+                org.mockito.ArgumentMatchers.<org.springframework.data.jpa.domain.Specification<Sale>>any(),
+                any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(pageSale), PageRequest.of(0, 10), 1));
+        when(saleRepository.findReadModelsByIdIn(List.of(20L))).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.filterSales(filter, PageRequest.of(0, 10)))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("Sale disappeared during read: 20");
     }
 
     private CreateSaleRequest saleRequest(

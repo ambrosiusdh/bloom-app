@@ -28,4 +28,25 @@ jobs:
           cache: 'maven'
 
       - name: Verify with Maven
-        run: mvn clean verify
+        run: ./mvnw --batch-mode --no-transfer-progress clean verify
+
+  windows-path-with-spaces:
+    runs-on: windows-latest
+    env:
+      MAVEN_USER_HOME: ${{ runner.temp }}\Maven Cache With Spaces
+
+    steps:
+      - name: Checkout into a path containing spaces
+        uses: actions/checkout@v4
+        with:
+          path: source with spaces
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Build through the Windows Maven wrapper
+        working-directory: source with spaces
+        run: .\mvnw.cmd --batch-mode --no-transfer-progress -DskipTests package

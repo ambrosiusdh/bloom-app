@@ -93,6 +93,7 @@ class V21UpgradePathMigrationTest {
             Flyway upgraded = Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:migration")
+                .target("21")
                 .load();
 
             assertThatThrownBy(upgraded::migrate)
@@ -142,6 +143,47 @@ class V21UpgradePathMigrationTest {
                     WHERE idempotency_key = 'upgrade-payment-key'
                     """)).isEqualTo(1L);
             }
+        } finally {
+            postgres.stop();
+        }
+    }
+
+    @Test
+    void refusesToDropNonEmptyLegacyStockMovementLinks() throws Exception {
+        PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15-alpine");
+        postgres.start();
+        try {
+            Flyway.configure()
+                .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:migration")
+                .target("20")
+                .load()
+                .migrate();
+
+            try (Connection connection = DriverManager.getConnection(
+                    postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+                 Statement statement = connection.createStatement()) {
+                statement.execute("""
+                    CREATE TABLE stock_movement_legacy_audit_links (
+                        stock_movement_id BIGINT PRIMARY KEY
+                    )
+                    """);
+                statement.executeUpdate("""
+                    INSERT INTO stock_movement_legacy_audit_links (stock_movement_id)
+                    VALUES (1)
+                    """);
+            }
+
+            Flyway upgraded = Flyway.configure()
+                .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:migration")
+                .target("21")
+                .load();
+
+            assertThatThrownBy(upgraded::migrate)
+                .rootCause()
+                .hasMessageContaining(
+                    "Cannot remove stock_movement_legacy_audit_links: 1 rows remain");
         } finally {
             postgres.stop();
         }

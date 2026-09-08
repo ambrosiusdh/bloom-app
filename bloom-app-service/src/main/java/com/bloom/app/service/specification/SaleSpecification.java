@@ -7,18 +7,25 @@ import org.springframework.data.jpa.domain.Specification;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class SaleSpecification {
     public static Specification<Sale> filter(FilterSaleRequest request) {
         return (root, criteriaQuery, criteriaBuilder) -> {
             List<Predicate> predicates = new ArrayList<>();
 
-            if (request.getCode() != null && !request.getCode().isEmpty()) {
-                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("code")), "%" + request.getCode().toLowerCase() + "%"));
+            if (hasText(request.getCode())) {
+                predicates.add(criteriaBuilder.like(
+                    criteriaBuilder.lower(root.get("code")),
+                    "%" + escapeLike(normalize(request.getCode())) + "%",
+                    '\\'));
             }
 
-            if (request.getCreatedBy() != null && !request.getCreatedBy().isEmpty()) {
-                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("createdBy")), "%" + request.getCreatedBy().toLowerCase() + "%"));
+            if (hasText(request.getCreatedBy())) {
+                predicates.add(criteriaBuilder.like(
+                    criteriaBuilder.lower(root.get("createdBy")),
+                    "%" + escapeLike(normalize(request.getCreatedBy())) + "%",
+                    '\\'));
             }
 
             if (request.getStartDate() != null) {
@@ -32,5 +39,20 @@ public class SaleSpecification {
 
             return criteriaBuilder.and(predicates.toArray(new Predicate[0]));
         };
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String normalize(String value) {
+        return value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    static String escapeLike(String value) {
+        return value
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_");
     }
 }
