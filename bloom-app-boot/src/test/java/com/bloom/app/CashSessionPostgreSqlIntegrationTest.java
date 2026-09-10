@@ -39,6 +39,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.hibernate.SessionFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -64,6 +66,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -832,9 +835,9 @@ class CashSessionPostgreSqlIntegrationTest {
         authenticateAdmin();
         Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
         String createKey = "owner-expense-" + UUID.randomUUID();
-        ExpenseResponse created = expenseService.createExpense(createKey, expenseRequest(
+        ExpenseResponse created = expenseService.createExpense(createKey, expenseRequest(sessionId,
             "25.0000", ExpenseCategory.OWNER_WITHDRAWAL, "Owner draw"));
-        ExpenseResponse retried = expenseService.createExpense(createKey, expenseRequest(
+        ExpenseResponse retried = expenseService.createExpense(createKey, expenseRequest(sessionId,
             "25.0", ExpenseCategory.OWNER_WITHDRAWAL, " Owner draw "));
 
         assertThat(retried.getId()).isEqualTo(created.getId());
@@ -845,7 +848,7 @@ class CashSessionPostgreSqlIntegrationTest {
             .isEqualByComparingTo("75.0000");
         assertThat(movementCount(created.getId(), "EXPENSE")).isEqualTo(1L);
         assertThat(movementCount(created.getId(), "EXPENSE_REVERSAL")).isZero();
-        assertThatThrownBy(() -> expenseService.createExpense(createKey, expenseRequest(
+        assertThatThrownBy(() -> expenseService.createExpense(createKey, expenseRequest(sessionId,
             "26.0000", ExpenseCategory.OWNER_WITHDRAWAL, "Owner draw")))
             .isInstanceOf(ExpenseIdempotencyConflictException.class);
         SecurityContextHolder.clearContext();
@@ -872,8 +875,10 @@ class CashSessionPostgreSqlIntegrationTest {
         authenticateAdmin();
         Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
         String createKey = "concurrent-expense-" + UUID.randomUUID();
-        CreateExpenseRequest request = expenseRequest(
+        CreateExpenseRequest request = expenseRequest(sessionId,
             "10.0000", ExpenseCategory.STORE_OPERATIONAL, "Cleaning supplies");
+        long expensesBefore = expenseRepository.count();
+        long movementsBefore = cashMovementRepository.count();
         SecurityContextHolder.clearContext();
 
         List<Object> outcomes = race(
@@ -885,9 +890,181 @@ class CashSessionPostgreSqlIntegrationTest {
         assertThat(outcomes).extracting(outcome -> ((ExpenseResponse) outcome).getId())
             .containsOnly(((ExpenseResponse) outcomes.getFirst()).getId());
         var expense = expenseRepository.findByCreateIdempotencyKey(createKey).orElseThrow();
+        assertThat(expenseRepository.count()).isEqualTo(expensesBefore + 1);
+        assertThat(cashMovementRepository.count()).isEqualTo(movementsBefore + 1);
+        assertThat(expense.getCashSession().getId()).isEqualTo(sessionId);
         assertThat(movementCount(expense.getId(), "EXPENSE")).isEqualTo(1L);
         assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
             .isEqualByComparingTo("90.0000");
+    }
+
+    @Test
+    void committedExpenseReplaysInClosedSessionAWhileBIsOpen() {
+        authenticateAdmin();
+        Long sessionA = cashSessionService.openSession(openRequest("100.0000")).getId();
+        String key = "closed-replay-" + UUID.randomUUID();
+        CreateExpenseRequest request = expenseRequest(
+            sessionA, "12.5000", ExpenseCategory.FOOD_AND_DRINK, "Team meal");
+        ExpenseResponse created = expenseService.createExpense(key, request);
+        ExpenseResponse persisted = expenseService.getExpense(created.getId());
+        cashSessionService.closeSession(sessionA, closeRequest("87.5000"));
+        Long sessionB = cashSessionService.openSession(openRequest("200.0000")).getId();
+        long expensesBefore = expenseRepository.count();
+        long movementsBefore = cashMovementRepository.count();
+
+        ExpenseResponse replayed = expenseService.createExpense(key, expenseRequest(
+            sessionA, "12.5", ExpenseCategory.FOOD_AND_DRINK, " Team meal "));
+
+        assertThat(replayed).usingRecursiveComparison().isEqualTo(persisted);
+        assertThat(replayed.getCashSessionId()).isEqualTo(sessionA);
+        assertThatThrownBy(() -> expenseService.createExpense(key, expenseRequest(
+            sessionB, "12.5", ExpenseCategory.FOOD_AND_DRINK, "Team meal")))
+            .isInstanceOf(ExpenseIdempotencyConflictException.class);
+        assertThatThrownBy(() -> expenseService.createExpense(key, expenseRequest(
+            sessionA, "13", ExpenseCategory.FOOD_AND_DRINK, "Team meal")))
+            .isInstanceOf(ExpenseIdempotencyConflictException.class);
+        assertThatThrownBy(() -> expenseService.createExpense(key, expenseRequest(
+            sessionA, "12.5", ExpenseCategory.CHARITY, "Team meal")))
+            .isInstanceOf(ExpenseIdempotencyConflictException.class);
+        assertThatThrownBy(() -> expenseService.createExpense(key, expenseRequest(
+            sessionA, "12.5", ExpenseCategory.FOOD_AND_DRINK, "Changed")))
+            .isInstanceOf(ExpenseIdempotencyConflictException.class);
+
+        assertThat(expenseRepository.count()).isEqualTo(expensesBefore);
+        assertThat(cashMovementRepository.count()).isEqualTo(movementsBefore);
+        assertThat(movementCount(created.getId(), "EXPENSE")).isEqualTo(1);
+        assertThat(cashSessionService.getSessionDetails(sessionB).getExpectedClosingCash())
+            .isEqualByComparingTo("200.0000");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void staleConfirmationOrRolledBackAttemptCannotPostIntoReplacementSession(boolean attempted) {
+        authenticateAdmin();
+        Long sessionA = cashSessionService.openSession(openRequest("100.0000")).getId();
+        String key = "stale-confirmation-" + UUID.randomUUID();
+        CreateExpenseRequest request = expenseRequest(
+            sessionA, "10.0000", ExpenseCategory.CHARITY, null);
+        long expensesBefore = expenseRepository.count();
+        long movementsBefore = cashMovementRepository.count();
+        if (attempted) {
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                expenseService.createExpense(key, request);
+                status.setRollbackOnly();
+            });
+        }
+        cashSessionService.closeSession(sessionA, closeRequest("100.0000"));
+        Long sessionB = cashSessionService.openSession(openRequest("200.0000")).getId();
+
+        assertThatThrownBy(() -> expenseService.createExpense(key, request))
+            .isInstanceOf(CashSessionConflictException.class)
+            .hasMessageContaining(sessionA.toString());
+
+        assertThat(expenseRepository.findByCreateIdempotencyKey(key)).isEmpty();
+        assertThat(expenseRepository.count()).isEqualTo(expensesBefore);
+        assertThat(cashMovementRepository.count()).isEqualTo(movementsBefore);
+        assertThat(cashSessionService.getSessionDetails(sessionA).getExpectedClosingCash())
+            .isEqualByComparingTo("100.0000");
+        assertThat(cashSessionService.getSessionDetails(sessionB).getExpectedClosingCash())
+            .isEqualByComparingTo("200.0000");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void expenseAndSessionCloseSerializeBothLockOrders(boolean expenseFirst) throws Exception {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        String key = "expense-close-race-" + UUID.randomUUID();
+        CreateExpenseRequest request = expenseRequest(
+            sessionId, "10.0000", ExpenseCategory.CHARITY, null);
+        long expensesBefore = expenseRepository.count();
+        long movementsBefore = cashMovementRepository.count();
+        Supplier<?> create = () -> expenseService.createExpense(key, request);
+        Supplier<?> close = () -> cashSessionService.closeSession(sessionId, closeRequest("100.0000"));
+        CountDownLatch firstReady = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        AtomicInteger secondBackendPid = new AtomicInteger();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            CompletableFuture<Object> first = authenticatedOutcome(executor, () ->
+                new TransactionTemplate(transactionManager).execute(status -> {
+                    Object result = (expenseFirst ? create : close).get();
+                    firstReady.countDown();
+                    awaitLatch(releaseFirst);
+                    return result;
+                }));
+            assertThat(firstReady.await(10, TimeUnit.SECONDS)).isTrue();
+            CompletableFuture<Object> second = authenticatedOutcome(executor, () ->
+                new TransactionTemplate(transactionManager).execute(status -> {
+                    secondBackendPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                    secondStarted.countDown();
+                    return (expenseFirst ? close : create).get();
+                }));
+            assertThat(secondStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            awaitDatabaseBlocker(secondBackendPid.get(), second);
+
+            // Even a flushed expense/movement is invisible until the shared transaction commits.
+            assertThat(expenseRepository.count()).isEqualTo(expensesBefore);
+            assertThat(cashMovementRepository.count()).isEqualTo(movementsBefore);
+            releaseFirst.countDown();
+            Object firstResult = first.get(10, TimeUnit.SECONDS);
+            Object secondResult = second.get(10, TimeUnit.SECONDS);
+
+            if (expenseFirst) {
+                assertThat(firstResult).isInstanceOf(ExpenseResponse.class);
+                assertThat(secondResult).isInstanceOf(CashSessionResponse.class);
+                ExpenseResponse created = (ExpenseResponse) firstResult;
+                assertThat(created.getCashSessionId()).isEqualTo(sessionId);
+                assertThat(movementCount(created.getId(), "EXPENSE")).isEqualTo(1);
+                assertThat(expenseRepository.count()).isEqualTo(expensesBefore + 1);
+                assertThat(cashMovementRepository.count()).isEqualTo(movementsBefore + 1);
+            } else {
+                assertThat(firstResult).isInstanceOf(CashSessionResponse.class);
+                assertThat(secondResult).isInstanceOf(CashSessionConflictException.class);
+                assertThat(expenseRepository.findByCreateIdempotencyKey(key)).isEmpty();
+                assertThat(expenseRepository.count()).isEqualTo(expensesBefore);
+                assertThat(cashMovementRepository.count()).isEqualTo(movementsBefore);
+            }
+            CashSessionResponse closed = cashSessionService.getSessionDetails(sessionId);
+            assertThat(closed.getStatus()).isEqualTo(CashSessionStatus.CLOSED);
+            assertThat(closed.getExpectedClosingCash())
+                .isEqualByComparingTo(expenseFirst ? "90.0000" : "100.0000");
+            assertThat(closed.getDifference())
+                .isEqualByComparingTo(expenseFirst ? "10.0000" : "0.0000");
+        } finally {
+            releaseFirst.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    private CompletableFuture<Object> authenticatedOutcome(ExecutorService executor, Supplier<?> operation) {
+        return CompletableFuture.supplyAsync(() -> {
+            authenticateAdmin();
+            try {
+                return operation.get();
+            } catch (RuntimeException exception) {
+                return exception;
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+        }, executor);
+    }
+
+    private void awaitDatabaseBlocker(int backendPid, CompletableFuture<?> operation) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            Boolean blocked = jdbcTemplate.queryForObject(
+                "SELECT cardinality(pg_blocking_pids(?)) > 0", Boolean.class, backendPid);
+            if (Boolean.TRUE.equals(blocked)) {
+                assertThat(operation).isNotDone();
+                return;
+            }
+            assertThat(operation).as("Operation must wait for the session lock").isNotDone();
+            Thread.sleep(25);
+        }
+        throw new AssertionError("Operation did not wait for the session lock");
     }
 
     @Test
@@ -895,7 +1072,7 @@ class CashSessionPostgreSqlIntegrationTest {
         authenticateAdmin();
         Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
         ExpenseResponse created = expenseService.createExpense(
-            "other-expense-" + UUID.randomUUID(), expenseRequest(
+            "other-expense-" + UUID.randomUUID(), expenseRequest(sessionId,
             "10.0000", ExpenseCategory.OTHER, "Emergency courier"));
 
         assertThatThrownBy(() -> jdbcTemplate.update(
@@ -917,19 +1094,19 @@ class CashSessionPostgreSqlIntegrationTest {
     @Test
     void expenseValidationAndLedgerFailureLeaveNoPartialExpense() {
         assertThatThrownBy(() -> expenseService.createExpense(
-            "no-session-" + UUID.randomUUID(), expenseRequest(
+            "no-session-" + UUID.randomUUID(), expenseRequest(Long.MAX_VALUE,
             "1.0000", ExpenseCategory.CHARITY, null)))
             .isInstanceOf(CashSessionConflictException.class);
 
         authenticateAdmin();
         Long sessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
         assertThatThrownBy(() -> expenseService.createExpense(
-            "zero-expense-" + UUID.randomUUID(), expenseRequest(
+            "zero-expense-" + UUID.randomUUID(), expenseRequest(sessionId,
             "0.0000", ExpenseCategory.CHARITY, null)))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("positive");
         assertThatThrownBy(() -> expenseService.createExpense(
-            "blank-other-" + UUID.randomUUID(), expenseRequest(
+            "blank-other-" + UUID.randomUUID(), expenseRequest(sessionId,
             "1.0000", ExpenseCategory.OTHER, "  ")))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("required for OTHER");
@@ -947,7 +1124,7 @@ class CashSessionPostgreSqlIntegrationTest {
 
         long expenseCountBefore = expenseRepository.count();
         assertThatThrownBy(() -> expenseService.createExpense(
-            "ledger-conflict-" + UUID.randomUUID(), expenseRequest(
+            "ledger-conflict-" + UUID.randomUUID(), expenseRequest(sessionId,
             "5.0000", ExpenseCategory.STORE_OPERATIONAL, "Cleaning supplies")))
             .isInstanceOf(CashMovementIdempotencyConflictException.class);
         assertThat(expenseRepository.count()).isEqualTo(expenseCountBefore);
@@ -1044,8 +1221,9 @@ class CashSessionPostgreSqlIntegrationTest {
     }
 
     private CreateExpenseRequest expenseRequest(
-            String amount, ExpenseCategory category, String description) {
+            Long sessionId, String amount, ExpenseCategory category, String description) {
         return CreateExpenseRequest.builder()
+            .expectedCashSessionId(sessionId)
             .amount(new BigDecimal(amount))
             .category(category)
             .description(description)

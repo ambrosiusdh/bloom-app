@@ -498,6 +498,59 @@ An `Expense` in Release 1 is an unexpected outflow of store drawer cash.
 
 An expense from a closed session cannot be voided in Release 1 because the compensating movement would mutate reconciled drawer history. A post-close correction workflow remains outside Release 1.
 
+#### Expense creation and session confirmation (FE-29)
+
+`POST /api/expenses` requires an `Idempotency-Key` header and this request body:
+
+```json
+{
+  "expectedCashSessionId": 7,
+  "amount": 12.5000,
+  "category": "FOOD_AND_DRINK",
+  "description": "Team meal"
+}
+```
+
+- `expectedCashSessionId` is a required positive integer (Java `Long`), captured from the
+  backend-confirmed open session during frontend confirmation. Missing, null, zero, or negative
+  values return HTTP 400. It is required on retries as well as first submissions.
+- The existing content contract remains: positive decimal `amount` with at most 15 integer and
+  four fractional digits; a supported `category`; optional `description` of at most 255 characters,
+  trimmed by the backend, with blank normalized to absent. `OTHER` requires a nonblank description.
+- The backend trims the idempotency key and requires a nonblank value of at most 100 characters.
+  A transaction first acquires the existing per-key advisory lock and checks for a committed expense.
+  Matching content and the same persisted cash-session ID return that expense, including after its
+  session closes. Replays do not record another movement or require an open session.
+- Changed canonical amount, category, description, or expected session for an existing key returns
+  HTTP 409 with `errorType: ExpenseIdempotencyConflictException`, before checking session eligibility.
+- For an unused key, the backend locks the specified cash-session row and requires `OPEN`.
+  A closed or missing expected session returns HTTP 409 with
+  `errorType: CashSessionConflictException`. It never substitutes another open session.
+- The expense, its one `EXPENSE` cash movement, and the backend cash update commit in one transaction.
+  Creation and close serialize on the same session row lock. If creation wins, closing includes the
+  committed movement; if close wins, creation rejects without an expense or movement.
+- A rolled-back attempt leaves no completed key. Retrying its original request after session A closes
+  cannot post into session B. Concurrent same-key requests retain advisory-lock serialization, the
+  expense-key uniqueness constraint, and the unique expense-posting movement constraint.
+- Successful creation and replay retain HTTP 201 with `ApiResponse<ExpenseResponse>` and the actual
+  persisted `cashSessionId`. The key and request hash are not response fields. Domain conflicts retain
+  the existing `success: false`, `code: 409`, `message`, and `errorType` response shape.
+
+**Persisted-key compatibility:** `expenses.create_request_hash` keeps its existing 64-character
+lowercase SHA-256 format. Its inputs remain the canonical amount (`stripTrailingZeros().toPlainString()`),
+category name, and trimmed description (absent becomes an empty string), in that order. Each UTF-8
+field is prefixed with its four-byte big-endian byte length. Session identity is compared separately
+against the immutable `expenses.cash_session_id`; it is not appended to the hash. This applies equally
+to existing and newly created keys. No hash rewrite, schema migration, historical expected-session
+backfill, or invented movement is needed. V15 already refuses unledgered historical expenses rather
+than fabricating their keys or movements.
+
+Previously committed keys remain replayable with their original content and actual recorded session
+as `expectedCashSessionId`. Old bodies that omit the new field now fail validation; this requires a
+coordinated frontend rollout. See [FE-29 frontend rollout](../operations/fe29-expense-session-rollout.md)
+for confirmation, retry, and pre-upgrade recovery requirements. This change adds no expense mutation
+or client-side financial calculation.
+
 ### Allowed expense categories
 
 Release 1 allows exactly these `ExpenseCategory` values:
