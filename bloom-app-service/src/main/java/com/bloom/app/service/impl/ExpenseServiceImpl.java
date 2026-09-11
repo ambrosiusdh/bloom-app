@@ -54,6 +54,10 @@ public class ExpenseServiceImpl implements ExpenseService {
         if (request == null) {
             throw new IllegalArgumentException("Create expense request is required");
         }
+        Long expectedCashSessionId = request.getExpectedCashSessionId();
+        if (expectedCashSessionId == null || expectedCashSessionId <= 0) {
+            throw new IllegalArgumentException("Expected cash session ID must be positive");
+        }
         BigDecimal amount = CashMoneyUtil.requirePositive(request.getAmount(), "Expense amount");
         ExpenseCategory category = requireCategory(request.getCategory());
         String description = normalizeOptional(request.getDescription(), "Expense description");
@@ -66,16 +70,24 @@ public class ExpenseServiceImpl implements ExpenseService {
         Expense existing = expenseRepository.findByCreateIdempotencyKey(normalizedKey)
             .orElse(null);
         if (existing != null) {
-            if (!existing.getCreateRequestHash().equals(requestHash)) {
+            // Keep the persisted content-hash format compatible with pre-FE-29 keys.
+            // The immutable session link supplies the other part of request identity.
+            if (!existing.getCashSession().getId().equals(expectedCashSessionId)
+                    || !existing.getCreateRequestHash().equals(requestHash)) {
                 throw new ExpenseIdempotencyConflictException();
             }
             return expenseMapper.toResponse(existing);
         }
 
         CashSession session = cashSessionRepository
-            .findFirstByStatusForUpdate(CashSessionStatus.OPEN)
+            .findByIdForUpdate(expectedCashSessionId)
             .orElseThrow(() -> new CashSessionConflictException(
-                "An open cash session is required to record an expense"));
+                "Expected cash session " + expectedCashSessionId + " is no longer available"));
+        if (session.getStatus() != CashSessionStatus.OPEN) {
+            throw new CashSessionConflictException(
+                "Expected cash session " + expectedCashSessionId
+                    + " is closed and rejects new expenses");
+        }
 
         Expense saved = expenseRepository.saveAndFlush(Expense.builder()
             .cashSession(session)

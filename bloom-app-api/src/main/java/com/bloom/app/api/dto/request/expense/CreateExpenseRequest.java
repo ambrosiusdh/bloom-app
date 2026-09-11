@@ -4,6 +4,7 @@ import com.bloom.app.domain.enums.ExpenseCategory;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -17,6 +18,10 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CreateExpenseRequest {
+    @NotNull(message = "Expected cash session ID is required")
+    @Positive(message = "Expected cash session ID must be positive")
+    private Long expectedCashSessionId;
+
     @NotNull(message = "Expense amount is required")
     @DecimalMin(value = "0.0001", message = "Expense amount must be positive")
     @Digits(integer = 15, fraction = 4,
