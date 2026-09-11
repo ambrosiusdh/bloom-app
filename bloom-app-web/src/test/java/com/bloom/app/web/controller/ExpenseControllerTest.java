@@ -3,12 +3,15 @@ package com.bloom.app.web.controller;
 import com.bloom.app.api.dto.response.expense.ExpenseResponse;
 import com.bloom.app.api.exception.GlobalExceptionHandler;
 import com.bloom.app.domain.enums.ExpenseCategory;
+import com.bloom.app.domain.enums.ExpenseVoidBlockReason;
 import com.bloom.app.domain.exception.CashSessionConflictException;
 import com.bloom.app.domain.exception.ExpenseIdempotencyConflictException;
 import com.bloom.app.service.ExpenseService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -20,6 +23,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.math.BigDecimal;
 import java.util.List;
 
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -54,6 +59,7 @@ class ExpenseControllerTest {
             .amount(new BigDecimal("12.5000"))
             .category(ExpenseCategory.FOOD_AND_DRINK)
             .operationalExpense(true)
+            .canVoid(true)
             .build());
 
         mockMvc.perform(post("/api/expenses")
@@ -66,7 +72,10 @@ class ExpenseControllerTest {
             .andExpect(jsonPath("$.success").value(true))
             .andExpect(jsonPath("$.data.id").value(41))
             .andExpect(jsonPath("$.data.cashSessionId").value(7))
-            .andExpect(jsonPath("$.data.category").value("FOOD_AND_DRINK"));
+            .andExpect(jsonPath("$.data.category").value("FOOD_AND_DRINK"))
+            .andExpect(jsonPath("$.data.canVoid").value(true))
+            .andExpect(jsonPath("$.data.voidBlockReason").hasJsonPath())
+            .andExpect(jsonPath("$.data.voidBlockReason").value(nullValue()));
         verify(expenseService).createExpense(eq("expense-41"), argThat(request ->
             Long.valueOf(7L).equals(request.getExpectedCashSessionId())));
     }
@@ -106,7 +115,7 @@ class ExpenseControllerTest {
     }
 
     @Test
-    void rejectsInvalidMoneyOtherWithoutDescriptionAndBlankVoidReason() throws Exception {
+    void rejectsInvalidMoneyAndOtherWithoutDescription() throws Exception {
         mockMvc.perform(post("/api/expenses")
                 .header("Idempotency-Key", "expense-invalid-money")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -130,12 +139,6 @@ class ExpenseControllerTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message")
                 .value("Expense description is required for OTHER category"));
-
-        mockMvc.perform(post("/api/expenses/41/void")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"reason\":\"  \"}"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.errorType").value("ValidationFailed"));
     }
 
     @Test
@@ -149,12 +152,15 @@ class ExpenseControllerTest {
     @Test
     void voidsAndListsWithExistingPaginationConvention() throws Exception {
         when(expenseService.voidExpense(eq(41L), any())).thenReturn(
-            ExpenseResponse.builder().id(41L).voided(true).voidedReason("Duplicate").build());
+            ExpenseResponse.builder().id(41L).voided(true).voidedReason("Duplicate")
+                .canVoid(false).voidBlockReason(ExpenseVoidBlockReason.ALREADY_VOIDED).build());
         mockMvc.perform(post("/api/expenses/41/void")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"reason\":\"Duplicate\"}"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.voided").value(true));
+            .andExpect(jsonPath("$.data.voided").value(true))
+            .andExpect(jsonPath("$.data.canVoid").value(false))
+            .andExpect(jsonPath("$.data.voidBlockReason").value("ALREADY_VOIDED"));
 
         when(expenseService.getExpenses(any())).thenReturn(new PageImpl<>(
             List.of(ExpenseResponse.builder().id(41L).build()), PageRequest.of(1, 1), 2));
@@ -163,5 +169,64 @@ class ExpenseControllerTest {
             .andExpect(jsonPath("$.data.content[0].id").value(41));
         verify(expenseService).getExpenses(argThat(pageable ->
             pageable.getPageNumber() == 1 && pageable.getPageSize() == 1));
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @EnumSource(ExpenseVoidBlockReason.class)
+    void serializesEligibilityConsistentlyInListAndDetail(ExpenseVoidBlockReason blockReason)
+            throws Exception {
+        ExpenseResponse response = ExpenseResponse.builder()
+            .id(41L)
+            .canVoid(blockReason == null)
+            .voidBlockReason(blockReason)
+            .build();
+        when(expenseService.getExpense(41L)).thenReturn(response);
+        when(expenseService.getExpenses(any())).thenReturn(
+            new PageImpl<>(List.of(response), PageRequest.of(0, 20), 1));
+
+        for (String path : List.of("/api/expenses", "/api/expenses/41")) {
+            String dataPath = path.endsWith("41") ? "$.data" : "$.data.content[0]";
+            mockMvc.perform(get(path))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(dataPath + ".canVoid").value(blockReason == null))
+                .andExpect(jsonPath(dataPath + ".voidBlockReason").hasJsonPath())
+                .andExpect(jsonPath(dataPath + ".voidBlockReason").value(
+                    blockReason == null ? nullValue() : is(blockReason.name())));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"reason\":null}", "{\"reason\":\"  \"}"})
+    void rejectsMissingNullOrBlankVoidReasons(String body) throws Exception {
+        mockMvc.perform(post("/api/expenses/41/void")
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.errorType").value("ValidationFailed"));
+        verifyNoInteractions(expenseService);
+    }
+
+    @Test
+    void rejectsOverlongVoidReason() throws Exception {
+        mockMvc.perform(post("/api/expenses/41/void")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"" + "x".repeat(256) + "\"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.errorType").value("ValidationFailed"));
+        verifyNoInteractions(expenseService);
+    }
+
+    @Test
+    void returnsStableConflictWhenSessionClosesBeforeVoid() throws Exception {
+        when(expenseService.voidExpense(eq(41L), any())).thenThrow(
+            new CashSessionConflictException(
+                "Cash session 7 is closed and rejects expense voids that change reconciled cash"));
+
+        mockMvc.perform(post("/api/expenses/41/void")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Duplicate\"}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.code").value(409))
+            .andExpect(jsonPath("$.errorType").value("CashSessionConflictException"));
     }
 }
