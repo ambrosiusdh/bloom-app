@@ -14,6 +14,7 @@ import com.bloom.app.api.dto.response.sale.SaleResponse;
 import com.bloom.app.domain.enums.CashMovementType;
 import com.bloom.app.domain.enums.CashSessionStatus;
 import com.bloom.app.domain.enums.ExpenseCategory;
+import com.bloom.app.domain.enums.ExpenseVoidBlockReason;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.PaymentType;
 import com.bloom.app.domain.enums.StockLocation;
@@ -59,6 +60,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import jakarta.persistence.EntityManagerFactory;
 
 import java.math.BigDecimal;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -71,6 +73,7 @@ import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 class CashSessionPostgreSqlIntegrationTest {
@@ -839,11 +842,14 @@ class CashSessionPostgreSqlIntegrationTest {
             "25.0000", ExpenseCategory.OWNER_WITHDRAWAL, "Owner draw"));
         ExpenseResponse retried = expenseService.createExpense(createKey, expenseRequest(sessionId,
             "25.0", ExpenseCategory.OWNER_WITHDRAWAL, " Owner draw "));
+        ExpenseResponse persisted = expenseService.getExpense(created.getId());
 
         assertThat(retried.getId()).isEqualTo(created.getId());
         assertThat(created.getCashSessionId()).isEqualTo(sessionId);
         assertThat(created.isOperationalExpense()).isFalse();
         assertThat(created.isVoided()).isFalse();
+        assertThat(created.isCanVoid()).isTrue();
+        assertThat(created.getVoidBlockReason()).isNull();
         assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
             .isEqualByComparingTo("75.0000");
         assertThat(movementCount(created.getId(), "EXPENSE")).isEqualTo(1L);
@@ -864,6 +870,14 @@ class CashSessionPostgreSqlIntegrationTest {
         assertThat(voided.getVoidedReason()).isIn("Wrong drawer", "Retry");
         assertThat(voided.getVoidedAt()).isNotNull();
         assertThat(voided.getVoidedBy()).isEqualTo("admin");
+        assertThat(voided.isCanVoid()).isFalse();
+        assertThat(voided.getVoidBlockReason()).isEqualTo(ExpenseVoidBlockReason.ALREADY_VOIDED);
+        assertThat(outcomes).allSatisfy(outcome ->
+            assertVoidResponseMatchesStoredAudit((ExpenseResponse) outcome, voided));
+        assertThat(voided).usingRecursiveComparison()
+            .ignoringFields("voided", "voidedReason", "voidedAt", "voidedBy", "version",
+                "canVoid", "voidBlockReason")
+            .isEqualTo(persisted);
         assertThat(movementCount(created.getId(), "EXPENSE")).isEqualTo(1L);
         assertThat(movementCount(created.getId(), "EXPENSE_REVERSAL")).isEqualTo(1L);
         assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
@@ -915,7 +929,10 @@ class CashSessionPostgreSqlIntegrationTest {
         ExpenseResponse replayed = expenseService.createExpense(key, expenseRequest(
             sessionA, "12.5", ExpenseCategory.FOOD_AND_DRINK, " Team meal "));
 
-        assertThat(replayed).usingRecursiveComparison().isEqualTo(persisted);
+        assertThat(replayed).usingRecursiveComparison()
+            .ignoringFields("canVoid", "voidBlockReason").isEqualTo(persisted);
+        assertThat(replayed.isCanVoid()).isFalse();
+        assertThat(replayed.getVoidBlockReason()).isEqualTo(ExpenseVoidBlockReason.CASH_SESSION_CLOSED);
         assertThat(replayed.getCashSessionId()).isEqualTo(sessionA);
         assertThatThrownBy(() -> expenseService.createExpense(key, expenseRequest(
             sessionB, "12.5", ExpenseCategory.FOOD_AND_DRINK, "Team meal")))
@@ -1037,6 +1054,160 @@ class CashSessionPostgreSqlIntegrationTest {
             executor.shutdownNow();
             assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
         }
+    }
+
+    @Test
+    void expenseEligibilityReadsAllSessionStatesWithoutWritesOrPerRowQueries() {
+        authenticateAdmin();
+        Long closedSessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        ExpenseResponse activeClosed = expenseService.createExpense(
+            "closed-active-" + UUID.randomUUID(), expenseRequest(
+                closedSessionId, "10", ExpenseCategory.CHARITY, null));
+        ExpenseResponse voidedClosed = expenseService.createExpense(
+            "closed-voided-" + UUID.randomUUID(), expenseRequest(
+                closedSessionId, "10", ExpenseCategory.CHARITY, null));
+        expenseService.voidExpense(voidedClosed.getId(), voidRequest("Duplicate"));
+        cashSessionService.closeSession(closedSessionId, closeRequest("90"));
+        Long openSessionId = cashSessionService.openSession(openRequest("100.0000")).getId();
+        ExpenseResponse activeOpen = expenseService.createExpense(
+            "open-active-" + UUID.randomUUID(), expenseRequest(
+                openSessionId, "10", ExpenseCategory.CHARITY, null));
+        ExpenseResponse voidedOpen = expenseService.createExpense(
+            "open-voided-" + UUID.randomUUID(), expenseRequest(
+                openSessionId, "10", ExpenseCategory.CHARITY, null));
+        expenseService.voidExpense(voidedOpen.getId(), voidRequest("Duplicate"));
+
+        var before = jdbcTemplate.queryForList("SELECT * FROM expenses ORDER BY id");
+        long movementsBefore = cashMovementRepository.count();
+        SessionFactory sessionFactory = entityManagerFactory.unwrap(SessionFactory.class);
+        sessionFactory.getStatistics().clear();
+
+        Page<ExpenseResponse> page = expenseService.getExpenses(PageRequest.of(0, 4));
+
+        assertThat(sessionFactory.getStatistics().getPrepareStatementCount()).isLessThanOrEqualTo(2);
+        assertThat(page.getContent()).extracting(ExpenseResponse::getId)
+            .containsExactly(voidedOpen.getId(), activeOpen.getId(), voidedClosed.getId(), activeClosed.getId());
+        assertThat(page.getContent()).extracting(ExpenseResponse::isCanVoid)
+            .containsExactly(false, true, false, false);
+        assertThat(page.getContent()).extracting(ExpenseResponse::getVoidBlockReason)
+            .containsExactly(ExpenseVoidBlockReason.ALREADY_VOIDED, null,
+                ExpenseVoidBlockReason.ALREADY_VOIDED, ExpenseVoidBlockReason.CASH_SESSION_CLOSED);
+        for (ExpenseResponse expense : page) {
+            assertThat(expenseService.getExpense(expense.getId())).isEqualTo(expense);
+        }
+        assertThat(sessionFactory.getStatistics().getEntityInsertCount()).isZero();
+        assertThat(sessionFactory.getStatistics().getEntityUpdateCount()).isZero();
+        assertThat(sessionFactory.getStatistics().getEntityDeleteCount()).isZero();
+        assertThat(jdbcTemplate.queryForList("SELECT * FROM expenses ORDER BY id")).isEqualTo(before);
+        assertThat(cashMovementRepository.count()).isEqualTo(movementsBefore);
+    }
+
+    @Test
+    void staleEligibilityReplaysFirstVoidAuditEvenWithDifferentReasonAndAfterClose() {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100")).getId();
+        ExpenseResponse created = expenseService.createExpense(
+            "stale-void-" + UUID.randomUUID(), expenseRequest(
+                sessionId, "10", ExpenseCategory.CHARITY, "Original note"));
+        assertThat(expenseService.getExpense(created.getId()).isCanVoid()).isTrue();
+        ExpenseResponse returned = expenseService.voidExpense(created.getId(), voidRequest("  Duplicate  "));
+        ExpenseResponse voided = expenseService.getExpense(created.getId());
+        assertVoidResponseMatchesStoredAudit(returned, voided);
+        assertThat(voided.getVoidedReason()).isEqualTo("Duplicate");
+
+        // A later caller's identity/reason cannot replace the confirmed audit result.
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken("later-caller", "ignored", List.of()));
+        assertThat(expenseService.voidExpense(created.getId(), voidRequest("Different reason")))
+            .isEqualTo(voided);
+        authenticateAdmin();
+        cashSessionService.closeSession(sessionId, closeRequest("100"));
+        var before = jdbcTemplate.queryForList("SELECT * FROM expenses WHERE id = ?", created.getId());
+        assertThat(expenseService.voidExpense(created.getId(), voidRequest("Retry after close")))
+            .isEqualTo(voided);
+        assertThat(expenseService.getExpense(created.getId())).isEqualTo(voided);
+        assertThat(jdbcTemplate.queryForList("SELECT * FROM expenses WHERE id = ?", created.getId()))
+            .isEqualTo(before);
+        assertThat(movementCount(created.getId(), "EXPENSE")).isEqualTo(1);
+        assertThat(movementCount(created.getId(), "EXPENSE_REVERSAL")).isEqualTo(1);
+        assertThat(cashSessionService.getSessionDetails(sessionId).getExpectedClosingCash())
+            .isEqualByComparingTo("100");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void expenseVoidAndSessionCloseSerializeBothLockOrders(boolean voidFirst) throws Exception {
+        authenticateAdmin();
+        Long sessionId = cashSessionService.openSession(openRequest("100")).getId();
+        ExpenseResponse created = expenseService.createExpense(
+            "void-close-race-" + UUID.randomUUID(), expenseRequest(
+                sessionId, "10", ExpenseCategory.CHARITY, null));
+        ExpenseResponse persisted = expenseService.getExpense(created.getId());
+        assertThat(expenseService.getExpense(created.getId()).isCanVoid()).isTrue();
+        Supplier<?> reverse = () -> expenseService.voidExpense(created.getId(), voidRequest("Duplicate"));
+        Supplier<?> close = () -> cashSessionService.closeSession(sessionId, closeRequest("100"));
+        CountDownLatch firstReady = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        AtomicInteger secondBackendPid = new AtomicInteger();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            CompletableFuture<Object> first = authenticatedOutcome(executor, () ->
+                new TransactionTemplate(transactionManager).execute(status -> {
+                    Object result = (voidFirst ? reverse : close).get();
+                    firstReady.countDown();
+                    awaitLatch(releaseFirst);
+                    return result;
+                }));
+            assertThat(firstReady.await(10, TimeUnit.SECONDS)).isTrue();
+            CompletableFuture<Object> second = authenticatedOutcome(executor, () ->
+                new TransactionTemplate(transactionManager).execute(status -> {
+                    secondBackendPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                    secondStarted.countDown();
+                    return (voidFirst ? close : reverse).get();
+                }));
+            assertThat(secondStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            awaitDatabaseBlocker(secondBackendPid.get(), second);
+            assertThat(expenseService.getExpense(created.getId()).isVoided()).isFalse();
+            assertThat(movementCount(created.getId(), "EXPENSE_REVERSAL")).isZero();
+            releaseFirst.countDown();
+            Object firstResult = first.get(10, TimeUnit.SECONDS);
+            Object secondResult = second.get(10, TimeUnit.SECONDS);
+
+            ExpenseResponse stored = expenseService.getExpense(created.getId());
+            assertThat(stored.isCanVoid()).isFalse();
+            if (voidFirst) {
+                assertThat(firstResult).isInstanceOf(ExpenseResponse.class);
+                assertVoidResponseMatchesStoredAudit((ExpenseResponse) firstResult, stored);
+                assertThat(secondResult).isInstanceOf(CashSessionResponse.class);
+                assertThat(stored.getVoidBlockReason()).isEqualTo(ExpenseVoidBlockReason.ALREADY_VOIDED);
+                assertThat(expenseService.voidExpense(created.getId(), voidRequest("Retry"))).isEqualTo(stored);
+            } else {
+                assertThat(firstResult).isInstanceOf(CashSessionResponse.class);
+                assertThat(secondResult).isInstanceOf(CashSessionConflictException.class);
+                assertThat(stored).usingRecursiveComparison()
+                    .ignoringFields("canVoid", "voidBlockReason").isEqualTo(persisted);
+                assertThat(stored.getVoidBlockReason()).isEqualTo(ExpenseVoidBlockReason.CASH_SESSION_CLOSED);
+            }
+            assertThat(movementCount(created.getId(), "EXPENSE")).isEqualTo(1);
+            assertThat(movementCount(created.getId(), "EXPENSE_REVERSAL")).isEqualTo(voidFirst ? 1 : 0);
+            CashSessionResponse closed = cashSessionService.getSessionDetails(sessionId);
+            assertThat(closed.getStatus()).isEqualTo(CashSessionStatus.CLOSED);
+            assertThat(closed.getExpectedClosingCash()).isEqualByComparingTo(voidFirst ? "100" : "90");
+            assertThat(closed.getDifference()).isEqualByComparingTo(voidFirst ? "0" : "10");
+            assertThat(cashSessionService.calculateExpectedCash(sessionId).getExpectedClosingCash())
+                .isEqualByComparingTo(closed.getExpectedClosingCash());
+        } finally {
+            releaseFirst.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    private void assertVoidResponseMatchesStoredAudit(ExpenseResponse returned, ExpenseResponse stored) {
+        assertThat(returned).usingRecursiveComparison().ignoringFields("voidedAt").isEqualTo(stored);
+        // PostgreSQL stores microseconds; the first response retains Instant.now() precision.
+        assertThat(returned.getVoidedAt()).isCloseTo(stored.getVoidedAt(), within(1, ChronoUnit.MICROS));
     }
 
     private CompletableFuture<Object> authenticatedOutcome(ExecutorService executor, Supplier<?> operation) {

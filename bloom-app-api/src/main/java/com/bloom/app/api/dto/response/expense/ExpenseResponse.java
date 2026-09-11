@@ -1,6 +1,7 @@
 package com.bloom.app.api.dto.response.expense;
 
 import com.bloom.app.domain.enums.ExpenseCategory;
+import com.bloom.app.domain.enums.ExpenseVoidBlockReason;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -21,6 +22,8 @@ public class ExpenseResponse {
     private boolean operationalExpense;
     private String description;
     private boolean voided;
+    private boolean canVoid;
+    private ExpenseVoidBlockReason voidBlockReason;
     private String voidedReason;
     private Instant voidedAt;
     private String voidedBy;

@@ -496,7 +496,7 @@ An `Expense` in Release 1 is an unexpected outflow of store drawer cash.
 - A mistake is retained and voided/reversed, never hard-deleted.
 - The existing `Expense.isVoided` and `voidedReason` vocabulary is the canonical minimum: a void requires a reason, leaves the original record present, and makes its net drawer effect zero.
 
-An expense from a closed session cannot be voided in Release 1 because the compensating movement would mutate reconciled drawer history. A post-close correction workflow remains outside Release 1.
+A first void of an expense from a closed session is prohibited in Release 1 because the compensating movement would mutate reconciled drawer history. Replaying an already-committed void remains read-only and supported after close. A post-close correction workflow remains outside Release 1.
 
 #### Expense creation and session confirmation (FE-29)
 
@@ -550,6 +550,135 @@ as `expectedCashSessionId`. Old bodies that omit the new field now fail validati
 coordinated frontend rollout. See [FE-29 frontend rollout](../operations/fe29-expense-session-rollout.md)
 for confirmation, retry, and pre-upgrade recovery requirements. This change adds no expense mutation
 or client-side financial calculation.
+
+#### Expense void eligibility and reversal (FE-30 backend gate)
+
+**Implemented contract:** every `ExpenseResponse` in list, detail, create/create replay, and
+void/void replay includes these additive fields. No new endpoint, request field, or migration is
+required:
+
+| Field | JSON type | Meaning |
+|---|---|---|
+| `canVoid` | boolean, non-null | Whether this expense may receive a first void at the time the backend reads it. |
+| `voidBlockReason` | string enum or explicit `null` | `ExpenseVoidBlockReason`: `ALREADY_VOIDED` or `CASH_SESSION_CLOSED`; `null` exactly when `canVoid` is `true`. |
+
+| Authoritative expense/session state | `canVoid` | `voidBlockReason` |
+|---|---|---|
+| Active, original session `OPEN` | `true` | `null` |
+| Active, original session `CLOSED` | `false` | `"CASH_SESSION_CLOSED"` |
+| Already voided, original session `OPEN` or `CLOSED` | `false` | `"ALREADY_VOIDED"` |
+
+Already-voided status takes precedence over session status. The API requires authentication and
+currently imposes no additional expense owner or role restriction. The backend computes eligibility
+from the expense and its original session; the frontend must display this decision rather than join
+separate session data or call the void mutation to discover eligibility.
+
+`GET /api/expenses` remains `ApiResponse<Page<ExpenseResponse>>`, with one-based request paging,
+zero-based response page indices, all-session history, and fixed `createdAt DESC, id DESC` ordering.
+`GET /api/expenses/{expenseId}` and successful voids return HTTP 200 with
+`ApiResponse<ExpenseResponse>`. Reads fetch the associated cash session with the expense query,
+including paged list reads, and do not write expenses, audit metadata, or movements. Reading history
+does not require a currently open session.
+
+Example eligible detail response (the same record shape appears under list `data.content`):
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "code": 200,
+  "data": {
+    "id": 41,
+    "cashSessionId": 7,
+    "amount": 12.5000,
+    "category": "FOOD_AND_DRINK",
+    "operationalExpense": true,
+    "description": "Team meal",
+    "voided": false,
+    "canVoid": true,
+    "voidBlockReason": null,
+    "voidedReason": null,
+    "voidedAt": null,
+    "voidedBy": null,
+    "createdAt": "2026-09-11T01:00:00Z",
+    "createdBy": "cashier",
+    "version": 0
+  }
+}
+```
+
+Example closed-session record (`data` value, same HTTP 200 wrapper):
+
+```json
+{
+  "id": 41, "cashSessionId": 7, "amount": 12.5000,
+  "category": "FOOD_AND_DRINK", "operationalExpense": true, "description": "Team meal",
+  "voided": false, "canVoid": false, "voidBlockReason": "CASH_SESSION_CLOSED",
+  "voidedReason": null, "voidedAt": null, "voidedBy": null,
+  "createdAt": "2026-09-11T01:00:00Z", "createdBy": "cashier", "version": 0
+}
+```
+
+Example already-voided record (`data` value, whether its session is open or closed):
+
+```json
+{
+  "id": 41, "cashSessionId": 7, "amount": 12.5000,
+  "category": "FOOD_AND_DRINK", "operationalExpense": true, "description": "Team meal",
+  "voided": true, "canVoid": false, "voidBlockReason": "ALREADY_VOIDED",
+  "voidedReason": "Duplicate", "voidedAt": "2026-09-11T02:00:00Z", "voidedBy": "admin",
+  "createdAt": "2026-09-11T01:00:00Z", "createdBy": "cashier", "version": 1
+}
+```
+
+`POST /api/expenses/{expenseId}/void` requires a JSON body such as `{"reason":"Duplicate"}`.
+The reason must be present, non-null, nonblank, and at most 255 characters; the backend trims it
+before storing it. Missing, blank, or overlong reasons return HTTP 400 with
+`errorType: ValidationFailed` and field errors in `message`; a missing/malformed body returns
+HTTP 400 with `errorType: HttpMessageNotReadableException`. Service-level validation also enforces
+a nonblank normalized reason of at most 255 characters. These rules apply to retries too.
+
+The mutation uses resource-level idempotency: it locks the expense and returns its stored result
+when already voided, even if the retry supplies a different valid reason or the session has closed.
+It preserves the first reason, actor, timestamp, and version and creates no second movement.
+An already-voided success confirms stored state; it does **not** establish that the current caller
+performed the reversal. There is no void `Idempotency-Key` requirement, client version precondition,
+or already-voided conflict.
+
+Eligibility is advisory in time. Another request may void the expense or close its session before
+submission. The mutation rechecks authoritative state within its transaction and locks; no client
+eligibility value is trusted. Void and close serialize through the original session row lock. If
+close wins, no reversal or void metadata commits. If void wins, close includes its reversal exactly
+once. An active expense whose session has closed returns HTTP 409, for example:
+
+```json
+{
+  "success": false,
+  "message": "Cash session 7 is closed and rejects expense voids that change reconciled cash",
+  "code": 409,
+  "errorType": "CashSessionConflictException"
+}
+```
+
+Use HTTP status and `errorType` for recovery, not message parsing. Unknown expense IDs return
+HTTP 404 with `errorType: ResourceNotFoundException`. Existing ledger identity conflicts use HTTP
+409 with `errorType: CashMovementIdempotencyConflictException`; optimistic persistence conflicts
+use HTTP 409 with the concrete exception class name, such as
+`ObjectOptimisticLockingFailureException`. These are not eligibility enum values. Refresh the
+expense after a conflict or ambiguous result and render its stored audit state.
+
+The original amount, category, description, cash-session link, and creation audit remain immutable.
+A first void atomically posts one `EXPENSE_REVERSAL` cash-in movement for the original amount and
+session, with source ID equal to the expense ID and reference `EXPENSE-{id}-VOID`, then records the
+void audit. The original `EXPENSE` cash-out movement remains. Their combined drawer effect is zero;
+the backend maintains expected cash and reconciles the ledger at close.
+
+After a void, refresh **`GET /api/cash-sessions/{cashSessionId}`**, using the expense response's
+original session ID, for backend-confirmed `expectedClosingCash` and session status. The existing
+`GET /api/cash-sessions/{cashSessionId}/expected-cash` supplies a backend ledger calculation, and
+`GET /api/cash-sessions/{cashSessionId}/movements` exposes the audit ledger. The frontend must never
+add the expense amount to a local drawer balance. No session reopening, retargeting, or post-close
+correction is implemented by this contract.
 
 ### Allowed expense categories
 
@@ -608,7 +737,7 @@ This matrix defines only mutability needed by the approved contract. Fields not 
 | Supplier payment record | Recorded with amount, method, payable application, and cash-session link when it is a drawer-cash payment. | Those financial facts are immutable after recording. | Payment reversal/void behavior is unresolved; do not delete or overwrite a recorded payment. |
 | `Supplier` | Supplier master data may be maintained independently of transaction facts. | Historical receipts and payments retain their transaction identity; the supplier's payable is not a directly editable balance. | Correct source receipts/payments through an approved audit path, not by overwriting debt. |
 | `CashSession` | An `OPEN` session may receive eligible sales and drawer-affecting records. Closing sets actual `closingCash`, `closedAt`, and `CLOSED`. | `openingCash` and `openedAt` are opening facts. A `CLOSED` session rejects new drawer-affecting records. | Reopen and post-close correction behavior is unresolved. |
-| `Expense` | Created in an open session. It may gain void metadata through the approved void/reversal path. | Original amount, category, description, session, and audit data remain present. It is never deleted. | Mark voided with a reason so its net drawer effect is zero; post-close handling is unresolved. |
+| `Expense` | Created in an open session. It may gain void metadata through the approved void/reversal path. | Original amount, category, description, session, and audit data remain present. It is never deleted. | A first void requires the original session to be open. Already-committed voids replay after close; a future post-close correction workflow is outside Release 1. |
 
 ## Explicit Release 1 exclusions
 
@@ -641,7 +770,7 @@ These observations describe the repository at review time; they are not addition
 - Current item create/update DTOs allow stock balances to enter through item master-data requests. That conflicts with opening-balance movements and the rule that all stock mutation goes through `StockMovementService`.
 - The current Flyway baseline does not yet align with mapped columns such as the two stock locations and movement before/after/location fields, and does not define all mapped supplier, cash-session, and expense structures.
 - `GoodsReceipt`, `GoodsReceiptItem`, and `Supplier` exist in the domain. Supplier-payment behavior does not yet have a repository-visible domain model or service.
-- `CashSession`, `CashSessionStatus`, `CashSessionRepository`, `Expense`, and `ExpenseCategory` exist, but no repository-visible cash-session or expense application service/controller was found.
+- The earlier absence of expense and cash-session application services/controllers is superseded by the implemented contracts above. Expense create/list/detail/void now return backend-owned void eligibility (FE-30); first voids after close remain prohibited, while committed voids replay without another movement.
 - The current sale `PaymentType` contains `CASH` and `QRIS`. `BANK_TRANSFER` is approved for supplier payments, not automatically for sales.
 - No React source tree or `package.json` was found in this Maven repository, so the existing React web client's request/response contract could not be verified here.
 

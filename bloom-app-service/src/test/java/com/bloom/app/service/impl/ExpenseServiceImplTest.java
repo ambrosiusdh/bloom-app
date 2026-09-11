@@ -284,6 +284,8 @@ class ExpenseServiceImplTest {
 
         assertThat(service.getExpense(41L)).isSameAs(expected);
         verify(expenseRepository).findDetailsById(41L);
+        verify(expenseRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(cashSessionRepository, cashMovementService, currentActorProvider);
     }
 
     @Test
@@ -307,6 +309,8 @@ class ExpenseServiceImplTest {
         assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(10);
         assertThat(pageableCaptor.getValue().getSort())
             .isEqualTo(Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
+        verify(expenseRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(cashSessionRepository, cashMovementService, currentActorProvider);
     }
 
     @Test
@@ -369,6 +373,26 @@ class ExpenseServiceImplTest {
             42L, VoidExpenseRequest.builder().reason("Too late").build()))
             .isInstanceOf(CashSessionConflictException.class)
             .hasMessageContaining("closed");
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"", "  "})
+    void rejectsMissingOrBlankVoidReasonBeforePersistence(String reason) {
+        assertThatThrownBy(() -> service.voidExpense(
+            41L, VoidExpenseRequest.builder().reason(reason).build()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Void reason is required");
+        verifyNoInteractions(expenseRepository, cashSessionRepository, cashMovementService);
+    }
+
+    @Test
+    void rejectsOverlongVoidReasonBeforePersistence() {
+        assertThatThrownBy(() -> service.voidExpense(
+            41L, VoidExpenseRequest.builder().reason("x".repeat(256)).build()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Void reason must not exceed 255 characters");
+        verifyNoInteractions(expenseRepository, cashSessionRepository, cashMovementService);
     }
 
     private CashSession openSession() {
