@@ -1,6 +1,7 @@
 package com.bloom.app.persistence.repository;
 
 import com.bloom.app.domain.model.Expense;
+import com.bloom.app.persistence.projection.DashboardExpenseTotals;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -15,6 +16,15 @@ import java.util.Optional;
 
 @Repository
 public interface ExpenseRepository extends JpaRepository<Expense, Long> {
+    @Query(value = """
+        SELECT COALESCE(SUM(expense.amount), 0) AS "activeExpenseAmount",
+               COUNT(*) AS "activeExpenseCount"
+        FROM expenses expense
+        WHERE expense.cash_session_id = :sessionId
+          AND expense.is_voided = FALSE
+        """, nativeQuery = true)
+    DashboardExpenseTotals summarizeActiveDrawerExpenses(@Param("sessionId") Long sessionId);
+
     @Query(
         value = "SELECT pg_advisory_xact_lock(hashtextextended('EXPENSE_CREATE:' || CAST(:key AS text), 0))",
         nativeQuery = true

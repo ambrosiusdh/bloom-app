@@ -2,6 +2,7 @@ package com.bloom.app.persistence.repository;
 
 import com.bloom.app.domain.model.GoodsReceipt;
 import com.bloom.app.persistence.projection.SupplierBalanceTotals;
+import com.bloom.app.persistence.projection.DashboardSupplierPayablesTotals;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -16,6 +17,24 @@ import java.util.Optional;
 @Repository
 public interface GoodsReceiptRepository extends JpaRepository<GoodsReceipt, Long>,
         org.springframework.data.jpa.repository.JpaSpecificationExecutor<GoodsReceipt> {
+    @Query(value = """
+        SELECT
+            COALESCE(SUM(GREATEST(receipt.total_amount - COALESCE(payment.paid_amount, 0), 0)), 0)
+                AS "outstandingAmount",
+            COUNT(*) FILTER (
+                WHERE receipt.total_amount - COALESCE(payment.paid_amount, 0) > 0
+            ) AS "openReceiptCount"
+        FROM goods_receipts receipt
+        LEFT JOIN (
+            SELECT goods_receipt_id, SUM(amount) AS paid_amount
+            FROM supplier_payments
+            WHERE is_voided = FALSE
+            GROUP BY goods_receipt_id
+        ) payment ON payment.goods_receipt_id = receipt.id
+        WHERE receipt.status = 'POSTED'
+        """, nativeQuery = true)
+    DashboardSupplierPayablesTotals summarizeOperationalPayables();
+
     Optional<GoodsReceipt> findByCode(String code);
 
     @Query(
