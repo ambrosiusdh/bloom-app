@@ -75,6 +75,13 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public User findUserById(Long id) {
+        log.debug("UserService findUserById using id: {}", id);
+        return userRepository.findById(id)
+            .orElseThrow(() -> new UserNotFoundException(String.valueOf(id)));
+    }
+
+    @Override
     public User findUserByUsername(String username) {
         log.debug("UserService findUserByUsername using username: {}", username);
         return userRepository.findByUsername(username)

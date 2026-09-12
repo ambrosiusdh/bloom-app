@@ -5,11 +5,15 @@ import com.bloom.app.domain.model.GoodsReceipt;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.jpa.domain.Specification;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
 public class GoodsReceiptSpecification {
-    public static Specification<GoodsReceipt> filter(FilterGoodsReceiptRequest request) {
+    public static Specification<GoodsReceipt> filter(
+            FilterGoodsReceiptRequest request, ZoneId storeZone) {
         return (root, query, criteriaBuilder) -> {
             List<Predicate> predicates = new ArrayList<>();
 
@@ -24,16 +28,24 @@ public class GoodsReceiptSpecification {
             }
 
             if (request.getReceivedDateFrom() != null) {
-                predicates.add(
-                        criteriaBuilder.greaterThanOrEqualTo(root.get("receivedDate"), request.getReceivedDateFrom()));
+                predicates.add(criteriaBuilder.greaterThanOrEqualTo(
+                    root.get("receivedDate"), startInclusive(request.getReceivedDateFrom(), storeZone)));
             }
 
             if (request.getReceivedDateTo() != null) {
-                predicates
-                        .add(criteriaBuilder.lessThanOrEqualTo(root.get("receivedDate"), request.getReceivedDateTo()));
+                predicates.add(criteriaBuilder.lessThan(
+                    root.get("receivedDate"), endExclusive(request.getReceivedDateTo(), storeZone)));
             }
 
             return criteriaBuilder.and(predicates.toArray(new Predicate[0]));
         };
+    }
+
+    static Instant startInclusive(LocalDate date, ZoneId storeZone) {
+        return date.atStartOfDay(storeZone).toInstant();
+    }
+
+    static Instant endExclusive(LocalDate date, ZoneId storeZone) {
+        return date.plusDays(1).atStartOfDay(storeZone).toInstant();
     }
 }

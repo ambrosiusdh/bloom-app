@@ -10,6 +10,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @Builder
 public class UserSessionData {
+    private String accountId;
     private String username;
     private String name;
     private String role;

@@ -20,6 +20,7 @@ import com.bloom.app.domain.model.GoodsReceipt;
 import com.bloom.app.domain.model.GoodsReceiptItem;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Supplier;
+import com.bloom.app.domain.properties.GoodsReceiptProperties;
 import com.bloom.app.domain.validation.InventoryQuantityValidator;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
 import com.bloom.app.persistence.repository.CashSessionRepository;
@@ -77,6 +78,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     private final CurrentActorProvider currentActorProvider;
     private final SupplierPaymentService supplierPaymentService;
     private final SupplierDebtCalculator supplierDebtCalculator;
+    private final GoodsReceiptProperties goodsReceiptProperties;
 
     @Override
     @Transactional
@@ -246,7 +248,13 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             FilterGoodsReceiptRequest request, Pageable pageable) {
         FilterGoodsReceiptRequest effectiveRequest = request == null
             ? new FilterGoodsReceiptRequest() : request;
-        Specification<GoodsReceipt> spec = GoodsReceiptSpecification.filter(effectiveRequest);
+        if (effectiveRequest.getReceivedDateFrom() != null
+                && effectiveRequest.getReceivedDateTo() != null
+                && effectiveRequest.getReceivedDateFrom().isAfter(effectiveRequest.getReceivedDateTo())) {
+            throw new IllegalArgumentException("Received date from must not be after received date to");
+        }
+        Specification<GoodsReceipt> spec = GoodsReceiptSpecification.filter(
+            effectiveRequest, goodsReceiptProperties.getStoreZoneId());
         Page<GoodsReceipt> page = goodsReceiptRepository.findAll(spec, pageable);
         Map<Long, BigDecimal> paidByReceipt = supplierDebtCalculator.validPaidAmounts(
             page.getContent().stream().map(GoodsReceipt::getId).toList());
