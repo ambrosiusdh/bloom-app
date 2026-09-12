@@ -3,6 +3,7 @@ package com.bloom.app.web.controller;
 import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.api.dto.response.ApiResponse;
 import com.bloom.app.api.dto.response.dashboard.DashboardResponse;
+import com.bloom.app.api.dto.response.dashboard.OperationalDashboardResponse;
 import com.bloom.app.service.DashboardService;
 import io.swagger.v3.oas.annotations.Operation;
 import lombok.RequiredArgsConstructor;
@@ -25,5 +26,15 @@ public class DashboardController {
     public ResponseEntity<ApiResponse<DashboardResponse>> getDashboardOverview() {
         DashboardResponse response = dashboardService.getDashboardOverview();
         return ResponseHelper.ok(response);
+    }
+
+    @GetMapping("/operational-overview")
+    @Operation(
+        summary = "Get the Release 1 operational dashboard",
+        description = "Returns sales today, current drawer-session operations, and supplier payables. " +
+            "Every authenticated Bloom user may read this endpoint."
+    )
+    public ResponseEntity<ApiResponse<OperationalDashboardResponse>> getOperationalOverview() {
+        return ResponseHelper.ok(dashboardService.getOperationalOverview());
     }
 }

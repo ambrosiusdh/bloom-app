@@ -2,23 +2,41 @@ package com.bloom.app.service.impl;
 
 import com.bloom.app.api.dto.response.dashboard.CategoryDto;
 import com.bloom.app.api.dto.response.dashboard.ChartDataPoint;
+import com.bloom.app.api.dto.response.dashboard.DashboardCashSessionState;
+import com.bloom.app.api.dto.response.dashboard.DashboardCurrentCashSessionResponse;
+import com.bloom.app.api.dto.response.dashboard.DashboardDrillDownDestination;
+import com.bloom.app.api.dto.response.dashboard.DashboardDrillDownResponse;
 import com.bloom.app.api.dto.response.dashboard.DashboardResponse;
+import com.bloom.app.api.dto.response.dashboard.DashboardSalesTodayResponse;
+import com.bloom.app.api.dto.response.dashboard.DashboardSupplierPayablesResponse;
 import com.bloom.app.api.dto.response.dashboard.LowStockDto;
+import com.bloom.app.api.dto.response.dashboard.OperationalDashboardResponse;
 import com.bloom.app.api.dto.response.dashboard.RevenueChartDto;
 import com.bloom.app.api.dto.response.dashboard.SummaryDto;
 import com.bloom.app.api.dto.response.dashboard.TransactionDto;
+import com.bloom.app.domain.enums.CashSessionStatus;
+import com.bloom.app.domain.model.CashSession;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.SaleItem;
 import com.bloom.app.domain.properties.BloomProperties;
+import com.bloom.app.domain.properties.DashboardProperties;
+import com.bloom.app.persistence.projection.DashboardExpenseTotals;
+import com.bloom.app.persistence.projection.DashboardSalesTodayTotals;
+import com.bloom.app.persistence.projection.DashboardSupplierPayablesTotals;
 import com.bloom.app.persistence.projection.TopCategoryProjection;
+import com.bloom.app.persistence.repository.CashSessionRepository;
+import com.bloom.app.persistence.repository.ExpenseRepository;
+import com.bloom.app.persistence.repository.GoodsReceiptRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.SaleRepository;
 import com.bloom.app.service.DashboardService;
+import com.bloom.app.service.util.CashReconciliationCalculator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.*;
@@ -34,6 +52,12 @@ public class DashboardServiceImpl implements DashboardService {
     private final SaleRepository saleRepository;
     private final ItemRepository itemRepository;
     private final BloomProperties bloomProperties;
+    private final CashSessionRepository cashSessionRepository;
+    private final ExpenseRepository expenseRepository;
+    private final GoodsReceiptRepository goodsReceiptRepository;
+    private final CashReconciliationCalculator cashReconciliationCalculator;
+    private final DashboardProperties dashboardProperties;
+    private final Clock clock;
 
     @Override
     public DashboardResponse getDashboardOverview() {
@@ -46,6 +70,94 @@ public class DashboardServiceImpl implements DashboardService {
             .topCategories(getTopCategories())
             .lowStock(getLowStockItems())
             .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OperationalDashboardResponse getOperationalOverview() {
+        Instant asOf = clock.instant();
+        ZoneId storeZone = dashboardProperties.getStoreZoneId();
+        LocalDate businessDate = asOf.atZone(storeZone).toLocalDate();
+        Instant periodStart = businessDate.atStartOfDay(storeZone).toInstant();
+        Instant periodEndExclusive = businessDate.plusDays(1).atStartOfDay(storeZone).toInstant();
+
+        DashboardSalesTodayTotals sales = saleRepository.summarizeOperationalSales(
+            periodStart, periodEndExclusive);
+        DashboardSupplierPayablesTotals payables =
+            goodsReceiptRepository.summarizeOperationalPayables();
+
+        return OperationalDashboardResponse.builder()
+            .asOf(asOf)
+            .freshUntil(asOf.plus(dashboardProperties.getFreshness()))
+            .businessDate(businessDate)
+            .storeZoneId(storeZone.getId())
+            .salesToday(DashboardSalesTodayResponse.builder()
+                .salesAmount(nonNegative(sales.getSalesAmount()))
+                .transactionCount(sales.getTransactionCount())
+                .periodStart(periodStart)
+                .periodEndExclusive(periodEndExclusive)
+                .drillDown(DashboardDrillDownResponse.builder()
+                    .destination(DashboardDrillDownDestination.SALES_HISTORY)
+                    .startDate(businessDate)
+                    .endDate(businessDate)
+                    .build())
+                .build())
+            .currentCashSession(currentCashSession())
+            .supplierPayables(DashboardSupplierPayablesResponse.builder()
+                .outstandingAmount(nonNegative(payables.getOutstandingAmount()))
+                .openReceiptCount(payables.getOpenReceiptCount())
+                .drillDown(destination(DashboardDrillDownDestination.PAYABLES))
+                .build())
+            .build();
+    }
+
+    private DashboardCurrentCashSessionResponse currentCashSession() {
+        Optional<CashSession> openSession =
+            cashSessionRepository.findFirstByStatus(CashSessionStatus.OPEN);
+        if (openSession.isEmpty()) {
+            return DashboardCurrentCashSessionResponse.builder()
+                .state(DashboardCashSessionState.NONE)
+                .drillDowns(List.of(destination(
+                    DashboardDrillDownDestination.CASH_SESSION_HISTORY)))
+                .build();
+        }
+
+        CashSession session = openSession.orElseThrow();
+        CashReconciliationCalculator.Calculation reconciliation =
+            cashReconciliationCalculator.calculate(session);
+        DashboardExpenseTotals expenses =
+            expenseRepository.summarizeActiveDrawerExpenses(session.getId());
+
+        return DashboardCurrentCashSessionResponse.builder()
+            .state(DashboardCashSessionState.OPEN)
+            .sessionId(session.getId())
+            .openedAt(session.getOpenedAt())
+            .openedBy(session.getOpenedBy().getUsername())
+            .openingCash(session.getOpeningCash())
+            .totalCashIn(reconciliation.totalCashIn())
+            .totalCashOut(reconciliation.totalCashOut())
+            .expectedClosingCash(reconciliation.expectedClosingCash())
+            .activeExpenseAmount(nonNegative(expenses.getActiveExpenseAmount()))
+            .activeExpenseCount(expenses.getActiveExpenseCount())
+            .drillDowns(List.of(
+                DashboardDrillDownResponse.builder()
+                    .destination(DashboardDrillDownDestination.CASH_SESSION_DETAIL)
+                    .reference(session.getId().toString())
+                    .build(),
+                destination(DashboardDrillDownDestination.EXPENSE_HISTORY)))
+            .build();
+    }
+
+    private DashboardDrillDownResponse destination(
+            DashboardDrillDownDestination destination) {
+        return DashboardDrillDownResponse.builder().destination(destination).build();
+    }
+
+    private BigDecimal nonNegative(BigDecimal value) {
+        if (value == null || value.signum() < 0) {
+            return BigDecimal.ZERO;
+        }
+        return value;
     }
 
     private List<SummaryDto> getSummaryCards() {

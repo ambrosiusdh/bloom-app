@@ -724,6 +724,240 @@ All terms are restricted to records linked to that cash session. The calculated 
 
 `QRIS` sales, `QRIS` supplier payments, and `BANK_TRANSFER` supplier payments are excluded from drawer reconciliation. A voided expense contributes zero. Release 1 has no approved miscellaneous drawer adjustment type; a correction must use an approved auditable source and must not be hidden by editing `openingCash`, `closingCash`, a sale, a payment, or an expense amount.
 
+## Release 1 operational dashboard read model (FE-31)
+
+### Endpoint, authorization, and compatibility
+
+`GET /api/dashboard/operational-overview` is the explicit Release 1 operational read model. It
+returns `ApiResponse<OperationalDashboardResponse>` and performs no mutation or server-side cache
+write. Under the current `SecurityConfig`, every authenticated Bloom user may read it; no dashboard
+role distinction is introduced. Anonymous requests receive HTTP 401.
+
+This endpoint is distinct from the legacy `GET /api/dashboard/overview`. The legacy endpoint and
+its `DashboardResponse` remain available unchanged for FE-08 compatibility until the frontend
+migrates. The operational response contains exactly sales today, current cash-session operations,
+and supplier payables. None of its values is profit, profitability, margin, net income, loss,
+business health, revenue recognition, or a general accounting report.
+
+### Response fields and nullability
+
+`OperationalDashboardResponse` contains:
+
+| Field | Type | Nullability |
+|---|---|---|
+| `asOf` | UTC `Instant` | non-null |
+| `freshUntil` | UTC `Instant` | non-null and later than `asOf` |
+| `businessDate` | `LocalDate` | non-null |
+| `storeZoneId` | canonical zone-ID string | non-null |
+| `salesToday` | `DashboardSalesTodayResponse` | non-null |
+| `currentCashSession` | `DashboardCurrentCashSessionResponse` | non-null |
+| `supplierPayables` | `DashboardSupplierPayablesResponse` | non-null |
+
+`DashboardSalesTodayResponse` contains:
+
+| Field | Type | Nullability |
+|---|---|---|
+| `salesAmount` | `BigDecimal` JSON number | non-null; zero when empty |
+| `transactionCount` | integer | non-null and non-negative |
+| `periodStart` | UTC `Instant` | non-null |
+| `periodEndExclusive` | UTC `Instant` | non-null |
+| `drillDown` | `DashboardDrillDownResponse` | non-null |
+
+`DashboardCurrentCashSessionResponse` contains `state`, `sessionId`, `openedAt`, `openedBy`,
+`openingCash`, `totalCashIn`, `totalCashOut`, `expectedClosingCash`, `activeExpenseAmount`,
+`activeExpenseCount`, and `drillDowns`. `state` is non-null and exactly `OPEN` or `NONE`, and
+`drillDowns` is always a non-null list. For `OPEN`, every other field is non-null and zero money or
+counts are represented by numeric zero. For `NONE`, every session identity, timestamp, actor, money,
+and count field is `null`; this is a successful HTTP 200 empty state, not a fabricated zero-valued
+session or HTTP 404.
+
+`DashboardSupplierPayablesResponse` contains non-null `BigDecimal outstandingAmount`, non-negative
+integer `openReceiptCount`, and non-null `DashboardDrillDownResponse drillDown`.
+
+`DashboardDrillDownResponse` contains non-null enum `destination` and nullable `reference`,
+`startDate`, and `endDate` fields. The backend returns semantic destinations, never frontend URLs.
+
+### Store day and freshness
+
+Release 1 uses `Asia/Jakarta` as the default store zone. The configured canonical zone is returned
+as `storeZoneId`; it can be overridden with `bloom.dashboard.store-zone-id` or
+`BLOOM_STORE_ZONE_ID`. Invalid zone IDs fail application startup during configuration binding. The
+freshness duration is `bloom.dashboard.freshness`, defaults to `PT5M`, and must be positive.
+
+At the beginning of one read, the service captures exactly one `asOf` from its injected `Clock`.
+It derives `businessDate` in the configured store zone, `periodStart` at the start of that date,
+and `periodEndExclusive` at the start of the next date. It returns
+`freshUntil = asOf + bloom.dashboard.freshness`. No use of the machine default time zone defines
+this store day.
+
+`asOf` identifies the instant used for the date and interval. A client may retain a prior successful
+response after a later request fails, and labels it stale when its clock is later than `freshUntil`.
+The response deliberately has no `isStale` flag. A database/query failure uses the normal API error
+behavior and does not silently return a server-cached response.
+
+### Metric definitions
+
+**Sales today.** `salesAmount` is the sum of persisted `sales.total_amount` for rows whose
+`created_at` is in the half-open store-time interval `[periodStart, periodEndExclusive)`.
+`transactionCount` counts exactly the same rows. Release 1 persists only completed, paid sales, so
+this is a persisted sales total. It is not cash tendered, cash received, profit, revenue
+recognition, or an accounting adjustment. Expenses, payables, discounts, cash change, and QRIS
+values are not subtracted or otherwise applied again.
+
+**Current cash-session operations.** When the globally open session exists, `totalCashIn`,
+`totalCashOut`, and live `expectedClosingCash` come from the existing
+`CashReconciliationCalculator`; the read neither duplicates the formula nor trusts the open
+session's stored expected value. `activeExpenseAmount` sums, and `activeExpenseCount` counts, all
+non-voided expenses linked to that exact session. Every category is included, including
+`OWNER_WITHDRAWAL`, so these values are active drawer expenses and not operational-expense or
+profit deductions. Voided expenses are excluded. When no session is open, the `NONE` null semantics
+above apply.
+
+**Supplier payables.** For each `POSTED` receipt, receipt outstanding equals its persisted total
+minus the sum of its non-voided supplier payments. `outstandingAmount` sums only positive
+receipt-level outstanding amounts, never goes negative, and `openReceiptCount` counts only posted
+receipts with positive calculated outstanding. Cancelled receipts, voided payments, supplier
+master fields, supplier credit/prepayment concepts, customer sales/debt, and frontend estimates are
+excluded. Payment totals are pre-aggregated by receipt before joining receipts, so multiple payment
+rows cannot multiply a receipt total and the query has no per-receipt/N+1 reads.
+
+### Drill-down combinations
+
+Only these combinations are valid:
+
+| Metric/state | `destination` | `reference` | `startDate` | `endDate` |
+|---|---|---|---|---|
+| Sales today | `SALES_HISTORY` | `null` | `businessDate` | `businessDate` |
+| Open session | `CASH_SESSION_DETAIL` | decimal `sessionId` string | `null` | `null` |
+| Open-session expenses | `EXPENSE_HISTORY` | `null` | `null` | `null` |
+| No open session | `CASH_SESSION_HISTORY` | `null` | `null` | `null` |
+| Supplier payables | `PAYABLES` | `null` | `null` | `null` |
+
+An `OPEN` session returns the detail and expense drill-downs. A `NONE` session returns a list
+containing only the cash-session-history destination.
+
+### Populated example with an open session
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "code": 200,
+  "data": {
+    "asOf": "2026-09-11T18:30:00Z",
+    "freshUntil": "2026-09-11T18:35:00Z",
+    "businessDate": "2026-09-12",
+    "storeZoneId": "Asia/Jakarta",
+    "salesToday": {
+      "salesAmount": 250000.1250,
+      "transactionCount": 12,
+      "periodStart": "2026-09-11T17:00:00Z",
+      "periodEndExclusive": "2026-09-12T17:00:00Z",
+      "drillDown": {
+        "destination": "SALES_HISTORY",
+        "reference": null,
+        "startDate": "2026-09-12",
+        "endDate": "2026-09-12"
+      }
+    },
+    "currentCashSession": {
+      "state": "OPEN",
+      "sessionId": 7,
+      "openedAt": "2026-09-11T17:05:00Z",
+      "openedBy": "cashier",
+      "openingCash": 100000.0000,
+      "totalCashIn": 175000.1250,
+      "totalCashOut": 25000.5000,
+      "expectedClosingCash": 249999.6250,
+      "activeExpenseAmount": 5000.5000,
+      "activeExpenseCount": 2,
+      "drillDowns": [
+        {
+          "destination": "CASH_SESSION_DETAIL",
+          "reference": "7",
+          "startDate": null,
+          "endDate": null
+        },
+        {
+          "destination": "EXPENSE_HISTORY",
+          "reference": null,
+          "startDate": null,
+          "endDate": null
+        }
+      ]
+    },
+    "supplierPayables": {
+      "outstandingAmount": 82500.2500,
+      "openReceiptCount": 3,
+      "drillDown": {
+        "destination": "PAYABLES",
+        "reference": null,
+        "startDate": null,
+        "endDate": null
+      }
+    }
+  }
+}
+```
+
+### Zero metrics with no open session
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "code": 200,
+  "data": {
+    "asOf": "2026-09-11T18:30:00Z",
+    "freshUntil": "2026-09-11T18:35:00Z",
+    "businessDate": "2026-09-12",
+    "storeZoneId": "Asia/Jakarta",
+    "salesToday": {
+      "salesAmount": 0.0000,
+      "transactionCount": 0,
+      "periodStart": "2026-09-11T17:00:00Z",
+      "periodEndExclusive": "2026-09-12T17:00:00Z",
+      "drillDown": {
+        "destination": "SALES_HISTORY",
+        "reference": null,
+        "startDate": "2026-09-12",
+        "endDate": "2026-09-12"
+      }
+    },
+    "currentCashSession": {
+      "state": "NONE",
+      "sessionId": null,
+      "openedAt": null,
+      "openedBy": null,
+      "openingCash": null,
+      "totalCashIn": null,
+      "totalCashOut": null,
+      "expectedClosingCash": null,
+      "activeExpenseAmount": null,
+      "activeExpenseCount": null,
+      "drillDowns": [
+        {
+          "destination": "CASH_SESSION_HISTORY",
+          "reference": null,
+          "startDate": null,
+          "endDate": null
+        }
+      ]
+    },
+    "supplierPayables": {
+      "outstandingAmount": 0.0000,
+      "openReceiptCount": 0,
+      "drillDown": {
+        "destination": "PAYABLES",
+        "reference": null,
+        "startDate": null,
+        "endDate": null
+      }
+    }
+  }
+}
+```
+
 ## Entity mutability matrix
 
 This matrix defines only mutability needed by the approved contract. Fields not mentioned here are not implicitly approved as mutable.

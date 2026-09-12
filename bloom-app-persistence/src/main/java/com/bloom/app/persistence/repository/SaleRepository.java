@@ -2,6 +2,7 @@ package com.bloom.app.persistence.repository;
 
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.persistence.projection.TopCategoryProjection;
+import com.bloom.app.persistence.projection.DashboardSalesTodayTotals;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -17,6 +18,17 @@ import java.util.List;
 import java.util.Optional;
 
 public interface SaleRepository extends JpaRepository<Sale, Long>, JpaSpecificationExecutor<Sale> {
+    @Query(value = """
+        SELECT COALESCE(SUM(sale.total_amount), 0) AS "salesAmount",
+               COUNT(*) AS "transactionCount"
+        FROM sales sale
+        WHERE sale.created_at >= :periodStart
+          AND sale.created_at < :periodEndExclusive
+        """, nativeQuery = true)
+    DashboardSalesTodayTotals summarizeOperationalSales(
+        @Param("periodStart") Instant periodStart,
+        @Param("periodEndExclusive") Instant periodEndExclusive);
+
     @Query(
         value = "SELECT pg_advisory_xact_lock(hashtextextended(CAST(:checkoutKey AS text), 0))",
         nativeQuery = true
