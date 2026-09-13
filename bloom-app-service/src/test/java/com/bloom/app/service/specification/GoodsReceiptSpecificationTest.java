@@ -3,6 +3,7 @@ package com.bloom.app.service.specification;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneId;
 
@@ -29,5 +30,21 @@ class GoodsReceiptSpecificationTest {
         assertThat(GoodsReceiptSpecification.endExclusive(
             LocalDate.parse("2026-12-31"), STORE_ZONE))
             .isEqualTo(Instant.parse("2026-12-31T17:00:00Z"));
+    }
+
+    @Test
+    void calendarBoundariesFollowOffsetTransitionsInsteadOfAssumingTwentyFourHours() {
+        ZoneId transitionZone = ZoneId.of("America/New_York");
+        Instant springStart = GoodsReceiptSpecification.startInclusive(
+            LocalDate.parse("2026-03-08"), transitionZone);
+        Instant springEnd = GoodsReceiptSpecification.endExclusive(
+            LocalDate.parse("2026-03-08"), transitionZone);
+        Instant autumnStart = GoodsReceiptSpecification.startInclusive(
+            LocalDate.parse("2026-11-01"), transitionZone);
+        Instant autumnEnd = GoodsReceiptSpecification.endExclusive(
+            LocalDate.parse("2026-11-01"), transitionZone);
+
+        assertThat(Duration.between(springStart, springEnd)).isEqualTo(Duration.ofHours(23));
+        assertThat(Duration.between(autumnStart, autumnEnd)).isEqualTo(Duration.ofHours(25));
     }
 }

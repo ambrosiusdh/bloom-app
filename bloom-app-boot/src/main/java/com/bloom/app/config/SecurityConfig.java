@@ -1,16 +1,22 @@
 package com.bloom.app.config;
 
+import com.bloom.app.api.dto.response.ApiResponse;
 import com.bloom.app.domain.properties.CorsProperties;
+import com.bloom.app.web.security.AuthenticatedSessionService;
+import com.bloom.app.web.security.SessionAccountValidationFilter;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -22,7 +28,13 @@ public class SecurityConfig {
     private final CorsProperties corsProperties;
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            AuthenticatedSessionService authenticatedSessionService,
+            ObjectMapper objectMapper) throws Exception {
+        SessionAccountValidationFilter sessionAccountValidationFilter =
+            new SessionAccountValidationFilter(authenticatedSessionService, objectMapper);
+
         return http
             .csrf(AbstractHttpConfigurer::disable)
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
@@ -46,8 +58,9 @@ public class SecurityConfig {
                 .maxSessionsPreventsLogin(false)
             )
             .exceptionHandling(exception -> exception
-                .authenticationEntryPoint(unauthorizedEntryPoint())
+                .authenticationEntryPoint(unauthorizedEntryPoint(objectMapper))
             )
+            .addFilterBefore(sessionAccountValidationFilter, AuthorizationFilter.class)
             .build();
     }
 
@@ -65,11 +78,14 @@ public class SecurityConfig {
     }
 
     @Bean
-    public AuthenticationEntryPoint unauthorizedEntryPoint() {
+    public AuthenticationEntryPoint unauthorizedEntryPoint(ObjectMapper objectMapper) {
         return (request, response, authException) -> {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            response.setContentType("application/json");
-            response.getWriter().write("{\"error\": \"Unauthorized\"}");
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            objectMapper.writeValue(
+                response.getOutputStream(),
+                ApiResponse.fail("Unauthorized", HttpServletResponse.SC_UNAUTHORIZED)
+            );
         };
     }
 

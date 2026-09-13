@@ -76,7 +76,7 @@ public class DashboardServiceImpl implements DashboardService {
     @Transactional(readOnly = true)
     public OperationalDashboardResponse getOperationalOverview() {
         Instant asOf = clock.instant();
-        ZoneId storeZone = dashboardProperties.getStoreZoneId();
+        ZoneId storeZone = bloomProperties.getStoreZoneId();
         LocalDate businessDate = asOf.atZone(storeZone).toLocalDate();
         Instant periodStart = businessDate.atStartOfDay(storeZone).toInstant();
         Instant periodEndExclusive = businessDate.plusDays(1).atStartOfDay(storeZone).toInstant();

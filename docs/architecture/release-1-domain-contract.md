@@ -74,17 +74,26 @@ Example:
 }
 ```
 
-The database-generated ID is stable across profile changes and reauthentication. Deleting an
-account does not reassign that ID; recreating the same username creates a different `accountId`.
-Login stores the proven identifier in the authenticated HTTP session. `/api/auth/current` validates
-the stored identifier by ID and refreshes the display fields from that exact account. It never looks
-up the stored username to attach an identifier.
+The database-generated ID is stable across profile changes and reauthentication. Generated user IDs
+are treated as non-reusable account-lifecycle identifiers: operations must not reset their sequence
+or manually reuse a historical ID. Recreating the same username normally generates a different
+`accountId`. Login stores the proven identifier in the authenticated HTTP session.
+
+Every authenticated request, except the public authentication, health, and API-documentation paths,
+resolves the stored `accountId` by exact database ID before controller authorization/work proceeds.
+It refreshes the session's display fields from that exact account and never looks up the stored
+username to attach an identifier. `/api/auth/current` returns this request-validated session identity.
 
 An already-existing session without `accountId`, an invalid identifier, or a session whose account
 has been deleted is invalidated and receives HTTP 401 with `data: null`; the operator must sign in
 again. A deleted account's session therefore cannot become a replacement same-username account's
 session. Frontends must quarantine username-only or ownerless persisted financial recovery and must
 not migrate it by matching `username`.
+
+Rollout is intentionally fail-closed. Deploy the account-ID-aware backend to all nodes before
+enabling frontend recovery ownership based on `accountId`. Sessions created by older nodes do not
+contain the required identifier and must sign in again; a mixed-version deployment can therefore
+produce safe but visible reauthentication until every backend node is upgraded.
 
 ## Schema ownership and runtime validation
 
@@ -331,7 +340,7 @@ The allocation rules for payments that cover more than one receipt, overpayments
 
 `GET /api/goods-receipts` accepts optional `receivedDateFrom` and `receivedDateTo` as ISO calendar
 dates (`YYYY-MM-DD`), not `Instant` strings. The backend interprets those dates using the canonical
-IANA zone configured by `bloom.goods-receipt.store-zone-id` or `BLOOM_STORE_ZONE_ID`; the default is
+IANA zone configured system-wide by `bloom.store-zone-id` or `BLOOM_STORE_ZONE_ID`; the default is
 `Asia/Jakarta`. Invalid zone IDs fail application startup.
 
 `receivedDateFrom` includes the configured store day's start. `receivedDateTo` includes the named
@@ -838,8 +847,9 @@ integer `openReceiptCount`, and non-null `DashboardDrillDownResponse drillDown`.
 
 ### Store day and freshness
 
-Release 1 uses `Asia/Jakarta` as the default store zone. The configured canonical zone is returned
-as `storeZoneId`; it can be overridden with `bloom.dashboard.store-zone-id` or
+Release 1 uses `Asia/Jakarta` as the default store zone. Goods-receipt calendar filters and the
+operational dashboard consume the same `bloom.store-zone-id` configuration. The configured canonical
+zone is returned as `storeZoneId`; it can be overridden with `bloom.store-zone-id` or
 `BLOOM_STORE_ZONE_ID`. Invalid zone IDs fail application startup during configuration binding. The
 freshness duration is `bloom.dashboard.freshness`, defaults to `PT5M`, and must be positive.
 

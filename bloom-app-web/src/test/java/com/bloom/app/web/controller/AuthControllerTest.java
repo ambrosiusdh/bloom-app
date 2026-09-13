@@ -6,12 +6,16 @@ import com.bloom.app.api.dto.response.ApiResponse;
 import com.bloom.app.domain.exception.UserNotFoundException;
 import com.bloom.app.domain.model.User;
 import com.bloom.app.service.UserService;
+import com.bloom.app.web.security.AuthenticatedSessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -19,15 +23,23 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class AuthControllerTest {
     private UserService userService;
     private AuthController controller;
+    private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         userService = mock(UserService.class);
-        controller = new AuthController(userService);
+        controller = new AuthController(
+            userService,
+            new AuthenticatedSessionService(userService)
+        );
+        mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
     @Test
@@ -139,6 +151,35 @@ class AuthControllerTest {
             requestWith(deletedSession, sessionUser("77", "deleted", "Deleted"))
         ).getStatusCode().value()).isEqualTo(401);
         verify(deletedSession).invalidate();
+    }
+
+    @Test
+    void currentSerializesAccountIdAsAStringInThePublicHttpEnvelope() throws Exception {
+        User account = user(41L, "kasir", "Kasir Satu");
+        when(userService.findUserById(41L)).thenReturn(account);
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute("currentUser", sessionUser("41", "kasir", "Kasir Lama"));
+
+        mockMvc.perform(get("/api/auth/current").session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.data.accountId").isString())
+            .andExpect(jsonPath("$.data.accountId").value("41"))
+            .andExpect(jsonPath("$.data.name").value("Kasir Satu"));
+    }
+
+    @Test
+    void currentReturnsTheStandardUnauthorizedEnvelopeForLegacyIdentity() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute("currentUser", sessionUser(null, "kasir", "Legacy"));
+
+        mockMvc.perform(get("/api/auth/current").session(session))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.code").value(401))
+            .andExpect(jsonPath("$.message")
+                .value("Session identity expired; sign in again"))
+            .andExpect(jsonPath("$.data").isEmpty());
     }
 
     private HttpServletRequest requestWith(HttpSession session, UserSessionData currentUser) {

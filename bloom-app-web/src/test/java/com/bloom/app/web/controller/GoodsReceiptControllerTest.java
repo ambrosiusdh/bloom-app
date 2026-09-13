@@ -191,4 +191,20 @@ class GoodsReceiptControllerTest {
                 .param("receivedDateFrom", "2026-02-29"))
             .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void mapsAnInvertedCalendarRangeToTheStandardBadRequestEnvelope() throws Exception {
+        when(goodsReceiptService.filterGoodsReceipts(any(), any()))
+            .thenThrow(new IllegalArgumentException(
+                "Received date from must not be after received date to"));
+
+        mockMvc.perform(get("/api/goods-receipts")
+                .param("receivedDateFrom", "2026-09-13")
+                .param("receivedDateTo", "2026-09-12"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.errorType").value("IllegalArgumentException"))
+            .andExpect(jsonPath("$.message")
+                .value("Received date from must not be after received date to"));
+    }
 }
