@@ -6,6 +6,8 @@ import com.bloom.app.api.dto.response.ApiResponse;
 import com.bloom.app.api.helper.ResponseHelper;
 import com.bloom.app.domain.model.User;
 import com.bloom.app.service.UserService;
+import com.bloom.app.web.security.AuthenticatedSessionService;
+import com.bloom.app.web.security.SessionIdentityException;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class AuthController {
     private final UserService userService;
+    private final AuthenticatedSessionService authenticatedSessionService;
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<Boolean>> login(
@@ -34,13 +37,8 @@ public class AuthController {
             log.info("User {} logged in", loginAuthRequest.getUsername());
 
             User loggedUser = userService.findUserByUsername(loginAuthRequest.getUsername());
-            UserSessionData userSessionData = UserSessionData.builder()
-                .username(loggedUser.getUsername())
-                .name(loggedUser.getName())
-                .role(loggedUser.getRole())
-                .build();
-
-            request.getSession().setAttribute("currentUser", userSessionData);
+            authenticatedSessionService.storeAuthenticatedAccount(
+                request.getSession(), loggedUser);
             return ResponseHelper.ok(Boolean.TRUE);
         } catch (ServletException e) {
             return ResponseHelper.unauthorizedRequest("Username or password is incorrect");
@@ -56,14 +54,12 @@ public class AuthController {
 
     @GetMapping("/current")
     public ResponseEntity<ApiResponse<Object>> getCurrentUser(HttpServletRequest request) {
-        var currentUser = request.getSession(false) != null ?
-            (UserSessionData) request.getSession(false).getAttribute("currentUser")
-            : null;
-
-        if (currentUser == null) {
-            return ResponseHelper.unauthorizedRequest("Session expired");
+        try {
+            UserSessionData currentUser = authenticatedSessionService
+                .requireFreshAccount(request);
+            return ResponseHelper.ok(currentUser);
+        } catch (SessionIdentityException exception) {
+            return ResponseHelper.unauthorizedRequest(exception.getMessage());
         }
-
-        return ResponseHelper.ok(currentUser);
     }
 }

@@ -41,6 +41,7 @@ class DashboardServiceImplTest {
     private ExpenseRepository expenseRepository;
     private GoodsReceiptRepository goodsReceiptRepository;
     private CashReconciliationCalculator reconciliationCalculator;
+    private BloomProperties bloomProperties;
     private DashboardProperties properties;
     private Instant asOf;
     private DashboardServiceImpl service;
@@ -52,14 +53,15 @@ class DashboardServiceImplTest {
         expenseRepository = mock(ExpenseRepository.class);
         goodsReceiptRepository = mock(GoodsReceiptRepository.class);
         reconciliationCalculator = mock(CashReconciliationCalculator.class);
+        bloomProperties = new BloomProperties();
+        bloomProperties.setStoreZoneId(ZoneId.of("Asia/Jakarta"));
         properties = new DashboardProperties();
-        properties.setStoreZoneId(ZoneId.of("Asia/Jakarta"));
         properties.setFreshness(Duration.ofMinutes(5));
         asOf = Instant.parse("2026-09-11T18:30:00Z");
         service = new DashboardServiceImpl(
             saleRepository,
             mock(ItemRepository.class),
-            new BloomProperties(),
+            bloomProperties,
             cashSessionRepository,
             expenseRepository,
             goodsReceiptRepository,

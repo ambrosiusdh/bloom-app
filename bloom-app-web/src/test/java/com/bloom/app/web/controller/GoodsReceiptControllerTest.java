@@ -1,23 +1,32 @@
 package com.bloom.app.web.controller;
 
+import com.bloom.app.api.dto.request.goodsreceipt.FilterGoodsReceiptRequest;
 import com.bloom.app.api.dto.response.goodsreceipt.GoodsReceiptResponse;
 import com.bloom.app.api.exception.GlobalExceptionHandler;
 import com.bloom.app.domain.enums.GoodsReceiptStatus;
 import com.bloom.app.service.GoodsReceiptService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -158,5 +167,44 @@ class GoodsReceiptControllerTest {
             .andExpect(jsonPath("$.code").value(400))
             .andExpect(jsonPath("$.errorType").value("IllegalArgumentException"))
             .andExpect(jsonPath("$.message").value("Supplier must be active: SUP-1"));
+    }
+
+    @Test
+    void bindsCalendarDateFiltersWithoutClientTimezoneConversion() throws Exception {
+        when(goodsReceiptService.filterGoodsReceipts(any(), any())).thenReturn(
+            new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
+
+        mockMvc.perform(get("/api/goods-receipts")
+                .param("receivedDateFrom", "2028-02-29")
+                .param("receivedDateTo", "2028-03-01")
+                .param("page", "1")
+                .param("size", "10"))
+            .andExpect(status().isOk());
+
+        ArgumentCaptor<FilterGoodsReceiptRequest> filter =
+            ArgumentCaptor.forClass(FilterGoodsReceiptRequest.class);
+        verify(goodsReceiptService).filterGoodsReceipts(filter.capture(), any(Pageable.class));
+        assertThat(filter.getValue().getReceivedDateFrom()).isEqualTo(LocalDate.parse("2028-02-29"));
+        assertThat(filter.getValue().getReceivedDateTo()).isEqualTo(LocalDate.parse("2028-03-01"));
+
+        mockMvc.perform(get("/api/goods-receipts")
+                .param("receivedDateFrom", "2026-02-29"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void mapsAnInvertedCalendarRangeToTheStandardBadRequestEnvelope() throws Exception {
+        when(goodsReceiptService.filterGoodsReceipts(any(), any()))
+            .thenThrow(new IllegalArgumentException(
+                "Received date from must not be after received date to"));
+
+        mockMvc.perform(get("/api/goods-receipts")
+                .param("receivedDateFrom", "2026-09-13")
+                .param("receivedDateTo", "2026-09-12"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.errorType").value("IllegalArgumentException"))
+            .andExpect(jsonPath("$.message")
+                .value("Received date from must not be after received date to"));
     }
 }

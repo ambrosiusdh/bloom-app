@@ -3,6 +3,7 @@ package com.bloom.app;
 import com.bloom.app.api.dto.request.goodsreceipt.CancelGoodsReceiptRequest;
 import com.bloom.app.api.dto.request.goodsreceipt.CreateGoodsReceiptItemRequest;
 import com.bloom.app.api.dto.request.goodsreceipt.CreateGoodsReceiptRequest;
+import com.bloom.app.api.dto.request.goodsreceipt.FilterGoodsReceiptRequest;
 import com.bloom.app.api.dto.response.goodsreceipt.GoodsReceiptResponse;
 import com.bloom.app.api.dto.request.supplierpayment.CreateSupplierPaymentRequest;
 import com.bloom.app.domain.enums.GoodsReceiptStatus;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -37,7 +39,9 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -257,6 +261,36 @@ class GoodsReceiptPostgreSqlIntegrationTest {
             .hasMessage("Goods receipt code must not exceed 100 characters");
     }
 
+    @Test
+    void calendarFilterAppliesJakartaBoundariesThroughPostgreSql() {
+        authenticate();
+        Supplier supplier = supplier(true);
+        Item item = fractionalItem("RECEIPT-DATE-BOUNDARY", "0.0000", "0.0000");
+        GoodsReceiptResponse beforeStart = createReceiptAt(
+            supplier, item, Instant.parse("2026-09-11T16:59:59.999999Z"));
+        GoodsReceiptResponse atStart = createReceiptAt(
+            supplier, item, Instant.parse("2026-09-11T17:00:00Z"));
+        GoodsReceiptResponse beforeEnd = createReceiptAt(
+            supplier, item, Instant.parse("2026-09-12T16:59:59.999999Z"));
+        GoodsReceiptResponse atEnd = createReceiptAt(
+            supplier, item, Instant.parse("2026-09-12T17:00:00Z"));
+
+        Set<String> returnedCodes = goodsReceiptService.filterGoodsReceipts(
+                FilterGoodsReceiptRequest.builder()
+                    .receivedDateFrom(LocalDate.parse("2026-09-12"))
+                    .receivedDateTo(LocalDate.parse("2026-09-12"))
+                    .build(),
+                PageRequest.of(0, 500))
+            .getContent()
+            .stream()
+            .map(GoodsReceiptResponse::getCode)
+            .collect(java.util.stream.Collectors.toSet());
+
+        assertThat(returnedCodes)
+            .contains(atStart.getCode(), beforeEnd.getCode())
+            .doesNotContain(beforeStart.getCode(), atEnd.getCode());
+    }
+
     private Supplier supplier(boolean active) {
         String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         return supplierRepository.saveAndFlush(Supplier.builder()
@@ -293,6 +327,15 @@ class GoodsReceiptPostgreSqlIntegrationTest {
             .description(" Release 1 receipt ")
             .items(lines)
             .build();
+    }
+
+    private GoodsReceiptResponse createReceiptAt(
+            Supplier supplier, Item item, Instant receivedDate) {
+        CreateGoodsReceiptRequest request = request(supplier.getCode(), List.of(
+            line(item.getSku(), "1.0000", "1.0000", StockLocation.STORE)));
+        request.setReceivedDate(receivedDate);
+        return goodsReceiptService.createGoodsReceipt(
+            "goods-receipt-date-" + UUID.randomUUID(), request);
     }
 
     private CreateGoodsReceiptItemRequest line(

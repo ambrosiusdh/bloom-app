@@ -46,6 +46,55 @@ Repository names are used where they already exist: `Item`, `Sale`, `SaleItem`, 
 | R1-23 | Every successfully committed Release 1 sale is `COMPLETED` and `PAID`; customer credit, unpaid sales, and partially paid sales are unsupported. |
 | R1-24 | Sale void, cancellation, refund, and item-return mutations are outside Release 1. The sale read model reports `correctionStatus: NONE`. |
 
+## Authenticated account identity contract
+
+`GET /api/auth/current` returns the authenticated account identity used to own durable frontend
+transaction recovery. Its `data` object contains these fields:
+
+| Field | JSON type | Meaning |
+|---|---|---|
+| `accountId` | string, non-null | Opaque decimal representation of the generated `users.id`. It identifies one account lifecycle and must be compared as an exact string. |
+| `username` | string, non-null | Current sign-in name; it is display/sign-in data and is not a recovery owner. |
+| `name` | string or `null` | Current display name. |
+| `role` | string or `null` | Current account role. |
+
+Example:
+
+```json
+{
+  "success": true,
+  "message": "Success",
+  "code": 200,
+  "data": {
+    "accountId": "41",
+    "username": "kasir",
+    "name": "Kasir Satu",
+    "role": "CASHIER"
+  }
+}
+```
+
+The database-generated ID is stable across profile changes and reauthentication. Generated user IDs
+are treated as non-reusable account-lifecycle identifiers: operations must not reset their sequence
+or manually reuse a historical ID. Recreating the same username normally generates a different
+`accountId`. Login stores the proven identifier in the authenticated HTTP session.
+
+Every authenticated request, except the public authentication, health, and API-documentation paths,
+resolves the stored `accountId` by exact database ID before controller authorization/work proceeds.
+It refreshes the session's display fields from that exact account and never looks up the stored
+username to attach an identifier. `/api/auth/current` returns this request-validated session identity.
+
+An already-existing session without `accountId`, an invalid identifier, or a session whose account
+has been deleted is invalidated and receives HTTP 401 with `data: null`; the operator must sign in
+again. A deleted account's session therefore cannot become a replacement same-username account's
+session. Frontends must quarantine username-only or ownerless persisted financial recovery and must
+not migrate it by matching `username`.
+
+Rollout is intentionally fail-closed. Deploy the account-ID-aware backend to all nodes before
+enabling frontend recovery ownership based on `accountId`. Sessions created by older nodes do not
+contain the required identifier and must sign in again; a mixed-version deployment can therefore
+produce safe but visible reauthentication until every backend node is upgraded.
+
 ## Schema ownership and runtime validation
 
 ### Confirmed decisions
@@ -286,6 +335,25 @@ supplier amount outstanding
 Only a `CASH` supplier payment reduces drawer cash. It must belong to the currently open `CashSession` and must be rejected when no session is open. `BANK_TRANSFER` and `QRIS` supplier payments have no physical drawer effect.
 
 The allocation rules for payments that cover more than one receipt, overpayments, and supplier credits are unresolved. Release 1 implementation must not invent those behaviors.
+
+### Goods-receipt calendar filter contract
+
+`GET /api/goods-receipts` accepts optional `receivedDateFrom` and `receivedDateTo` as ISO calendar
+dates (`YYYY-MM-DD`), not `Instant` strings. The backend interprets those dates using the canonical
+IANA zone configured system-wide by `bloom.store-zone-id` or `BLOOM_STORE_ZONE_ID`; the default is
+`Asia/Jakarta`. Invalid zone IDs fail application startup.
+
+`receivedDateFrom` includes the configured store day's start. `receivedDateTo` includes the named
+calendar day by using the start of the following store day as an exclusive Instant boundary. With
+the default zone, the same-day filter `2026-09-12` through `2026-09-12` produces
+`[2026-09-11T17:00:00Z, 2026-09-12T17:00:00Z)`. Start-only and end-only filters apply only their
+respective bound. A start date after the end date is rejected. Month, year, leap-day, and any future
+zone-offset transition are derived with `LocalDate.atStartOfDay(ZoneId)`, never from the server or
+browser machine default timezone.
+
+Clients preserve calendar dates in the URL and send them unchanged. They must not convert them with
+device-local `Date` construction. The specification remains one paged backend query and compares
+the persisted receipt `Instant` against the derived inclusive/exclusive boundaries.
 
 ## Cash-session, sale, and expense contract
 
@@ -779,8 +847,9 @@ integer `openReceiptCount`, and non-null `DashboardDrillDownResponse drillDown`.
 
 ### Store day and freshness
 
-Release 1 uses `Asia/Jakarta` as the default store zone. The configured canonical zone is returned
-as `storeZoneId`; it can be overridden with `bloom.dashboard.store-zone-id` or
+Release 1 uses `Asia/Jakarta` as the default store zone. Goods-receipt calendar filters and the
+operational dashboard consume the same `bloom.store-zone-id` configuration. The configured canonical
+zone is returned as `storeZoneId`; it can be overridden with `bloom.store-zone-id` or
 `BLOOM_STORE_ZONE_ID`. Invalid zone IDs fail application startup during configuration binding. The
 freshness duration is `bloom.dashboard.freshness`, defaults to `PT5M`, and must be positive.
 

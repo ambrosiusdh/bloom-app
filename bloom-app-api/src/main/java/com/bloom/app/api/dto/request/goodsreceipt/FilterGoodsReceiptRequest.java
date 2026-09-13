@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.Instant;
+import java.time.LocalDate;
 
 @Data
 @Builder
@@ -14,6 +14,6 @@ import java.time.Instant;
 public class FilterGoodsReceiptRequest {
     private String code;
     private String supplierName;
-    private Instant receivedDateFrom;
-    private Instant receivedDateTo;
+    private LocalDate receivedDateFrom;
+    private LocalDate receivedDateTo;
 }
