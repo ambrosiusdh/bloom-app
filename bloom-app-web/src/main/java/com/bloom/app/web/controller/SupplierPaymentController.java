@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @Validated
@@ -30,25 +31,65 @@ import org.springframework.web.bind.annotation.RestController;
 public class SupplierPaymentController {
     private final SupplierPaymentService supplierPaymentService;
 
-    @PostMapping("/api/goods-receipts/{code}/payments")
+    @PostMapping("/api/goods-receipts/payments")
     @Operation(summary = "Record a supplier payment against a goods receipt")
     public ResponseEntity<ApiResponse<SupplierPaymentResponse>> createPayment(
+            @RequestParam @NotBlank @Size(max = 100) String code,
+            @RequestHeader("Idempotency-Key")
+            @NotBlank(message = "Idempotency-Key header is required")
+            @Size(max = 100, message = "Idempotency-Key must not exceed 100 characters")
+            String idempotencyKey,
+            @Valid @RequestBody CreateSupplierPaymentRequest request) {
+        return createPaymentResponse(code, idempotencyKey, request);
+    }
+
+    @Deprecated
+    @PostMapping("/api/goods-receipts/{code}/payments")
+    @Operation(
+        summary = "Record a supplier payment using the legacy receipt-code path",
+        deprecated = true
+    )
+    public ResponseEntity<ApiResponse<SupplierPaymentResponse>> createPaymentLegacy(
             @PathVariable @NotBlank @Size(max = 100) String code,
             @RequestHeader("Idempotency-Key")
             @NotBlank(message = "Idempotency-Key header is required")
             @Size(max = 100, message = "Idempotency-Key must not exceed 100 characters")
             String idempotencyKey,
             @Valid @RequestBody CreateSupplierPaymentRequest request) {
+        return createPaymentResponse(code, idempotencyKey, request);
+    }
+
+    @GetMapping("/api/goods-receipts/payments")
+    @Operation(summary = "Get a receipt's complete supplier-payment history")
+    public ResponseEntity<ApiResponse<Page<SupplierPaymentResponse>>> getPaymentHistory(
+            @RequestParam @NotBlank @Size(max = 100) String code,
+            Pageable pageable) {
+        return getPaymentHistoryResponse(code, pageable);
+    }
+
+    @Deprecated
+    @GetMapping("/api/goods-receipts/{code}/payments")
+    @Operation(
+        summary = "Get supplier-payment history using the legacy receipt-code path",
+        deprecated = true
+    )
+    public ResponseEntity<ApiResponse<Page<SupplierPaymentResponse>>> getPaymentHistoryLegacy(
+            @PathVariable @NotBlank @Size(max = 100) String code,
+            Pageable pageable) {
+        return getPaymentHistoryResponse(code, pageable);
+    }
+
+    private ResponseEntity<ApiResponse<SupplierPaymentResponse>> createPaymentResponse(
+            String code,
+            String idempotencyKey,
+            CreateSupplierPaymentRequest request) {
         SupplierPaymentResponse response = supplierPaymentService
             .createPayment(code, idempotencyKey, request);
         return ResponseHelper.created("Supplier payment recorded successfully", response);
     }
 
-    @GetMapping("/api/goods-receipts/{code}/payments")
-    @Operation(summary = "Get a receipt's complete supplier-payment history")
-    public ResponseEntity<ApiResponse<Page<SupplierPaymentResponse>>> getPaymentHistory(
-            @PathVariable @NotBlank @Size(max = 100) String code,
-            Pageable pageable) {
+    private ResponseEntity<ApiResponse<Page<SupplierPaymentResponse>>> getPaymentHistoryResponse(
+            String code, Pageable pageable) {
         return ResponseHelper.ok(supplierPaymentService.getReceiptPaymentHistory(
             code, PagingHelper.toPageRequest(pageable)));
     }

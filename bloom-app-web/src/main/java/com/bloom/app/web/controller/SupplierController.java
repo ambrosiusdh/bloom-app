@@ -9,6 +9,7 @@ import com.bloom.app.api.dto.response.supplier.SupplierResponse;
 import com.bloom.app.api.dto.response.supplier.SupplierOutstandingBalanceResponse;
 import com.bloom.app.api.helper.PagingHelper;
 import com.bloom.app.api.helper.ResponseHelper;
+import com.bloom.app.domain.validation.SupplierCodePolicy;
 import com.bloom.app.service.SupplierService;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
@@ -52,7 +53,7 @@ public class SupplierController {
     @GetMapping("/{code}")
     @Operation(summary = "Get supplier details")
     public ResponseEntity<ApiResponse<SupplierResponse>> getSupplierDetails(
-        @PathVariable @NotBlank @Size(max = 255) String code
+        @PathVariable @NotBlank @Size(max = SupplierCodePolicy.MAX_LENGTH) String code
     ) {
         return ResponseHelper.ok(supplierService.getSupplierDetails(code));
     }
@@ -60,7 +61,7 @@ public class SupplierController {
     @GetMapping("/{code}/outstanding-balance")
     @Operation(summary = "Get a supplier's derived outstanding accounts-payable balance")
     public ResponseEntity<ApiResponse<SupplierOutstandingBalanceResponse>> getOutstandingBalance(
-        @PathVariable @NotBlank @Size(max = 255) String code
+        @PathVariable @NotBlank @Size(max = SupplierCodePolicy.MAX_LENGTH) String code
     ) {
         return ResponseHelper.ok(supplierService.getOutstandingBalance(code));
     }
@@ -76,7 +77,7 @@ public class SupplierController {
     @PutMapping("/{code}")
     @Operation(summary = "Update supplier master data")
     public ResponseEntity<ApiResponse<SupplierResponse>> updateSupplier(
-        @PathVariable @NotBlank @Size(max = 255) String code,
+        @PathVariable @NotBlank @Size(max = SupplierCodePolicy.MAX_LENGTH) String code,
         @Valid @RequestBody UpdateSupplierRequest request
     ) {
         return ResponseHelper.ok(supplierService.updateSupplier(code, request));
@@ -85,7 +86,7 @@ public class SupplierController {
     @PatchMapping("/{code}/activation")
     @Operation(summary = "Deactivate or reactivate a supplier")
     public ResponseEntity<ApiResponse<SupplierResponse>> setSupplierActive(
-        @PathVariable @NotBlank @Size(max = 255) String code,
+        @PathVariable @NotBlank @Size(max = SupplierCodePolicy.MAX_LENGTH) String code,
         @Valid @RequestBody SetSupplierActiveRequest request
     ) {
         return ResponseHelper.ok(supplierService.setSupplierActive(code, request.getActive()));
@@ -94,7 +95,7 @@ public class SupplierController {
     @DeleteMapping("/{code}")
     @Operation(summary = "Delete an unused supplier")
     public ResponseEntity<ApiResponse<Boolean>> deleteSupplier(
-        @PathVariable @NotBlank @Size(max = 255) String code
+        @PathVariable @NotBlank @Size(max = SupplierCodePolicy.MAX_LENGTH) String code
     ) {
         supplierService.deleteSupplier(code);
         return ResponseHelper.ok(Boolean.TRUE);

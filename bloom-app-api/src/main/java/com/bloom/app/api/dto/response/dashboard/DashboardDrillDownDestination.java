@@ -5,5 +5,6 @@ public enum DashboardDrillDownDestination {
     CASH_SESSION_HISTORY,
     CASH_SESSION_DETAIL,
     EXPENSE_HISTORY,
-    PAYABLES
+    PAYABLES,
+    ITEM_LIST
 }

@@ -22,6 +22,12 @@ public class GoodsReceiptSpecification {
                         "%" + request.getCode().toLowerCase() + "%"));
             }
 
+            String supplierCode = request.getSupplierCode();
+            if (supplierCode != null) {
+                predicates.add(criteriaBuilder.equal(
+                    root.get("supplier").get("code"), supplierCode));
+            }
+
             if (request.getSupplierName() != null && !request.getSupplierName().isEmpty()) {
                 predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("supplier").get("name")),
                         "%" + request.getSupplierName().toLowerCase() + "%"));

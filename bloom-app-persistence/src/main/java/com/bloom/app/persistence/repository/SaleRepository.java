@@ -3,6 +3,7 @@ package com.bloom.app.persistence.repository;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.persistence.projection.TopCategoryProjection;
 import com.bloom.app.persistence.projection.DashboardSalesTodayTotals;
+import com.bloom.app.persistence.projection.DashboardSalesDayTotals;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -13,11 +14,40 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 public interface SaleRepository extends JpaRepository<Sale, Long>, JpaSpecificationExecutor<Sale> {
+    @Query(value = """
+        WITH daily AS (
+            SELECT day::date AS business_date,
+                   COALESCE(SUM(sale.total_amount), 0) AS sales_amount,
+                   COUNT(sale.id) AS transaction_count
+            FROM generate_series(
+                CAST(:periodStartDate AS date),
+                CAST(:periodEndDate AS date),
+                INTERVAL '1 day'
+            ) AS day
+            LEFT JOIN sales sale
+              ON sale.created_at >= (day::date::timestamp AT TIME ZONE :storeZoneId)
+             AND sale.created_at < ((day::date + 1)::timestamp AT TIME ZONE :storeZoneId)
+            GROUP BY day::date
+        )
+        SELECT business_date AS "businessDate",
+               sales_amount AS "salesAmount",
+               transaction_count AS "transactionCount",
+               SUM(sales_amount) OVER () AS "periodSalesAmount",
+               SUM(transaction_count) OVER () AS "periodTransactionCount"
+        FROM daily
+        ORDER BY business_date
+        """, nativeQuery = true)
+    List<DashboardSalesDayTotals> summarizeOperationalSalesLast7Days(
+        @Param("periodStartDate") LocalDate periodStartDate,
+        @Param("periodEndDate") LocalDate periodEndDate,
+        @Param("storeZoneId") String storeZoneId);
+
     @Query(value = """
         SELECT COALESCE(SUM(sale.total_amount), 0) AS "salesAmount",
                COUNT(*) AS "transactionCount"

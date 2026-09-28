@@ -22,6 +22,7 @@ import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Supplier;
 import com.bloom.app.domain.properties.BloomProperties;
 import com.bloom.app.domain.validation.InventoryQuantityValidator;
+import com.bloom.app.domain.validation.SupplierCodePolicy;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
 import com.bloom.app.persistence.repository.CashSessionRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
@@ -31,7 +32,6 @@ import com.bloom.app.service.GoodsReceiptService;
 import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.SupplierPaymentService;
 import com.bloom.app.service.mapper.GoodsReceiptMapper;
-import com.bloom.app.service.mapper.SupplierMapper;
 import com.bloom.app.service.specification.GoodsReceiptSpecification;
 import com.bloom.app.service.util.CashMoneyUtil;
 import com.bloom.app.service.util.CurrentActorProvider;
@@ -106,7 +106,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         }
         lockCashSessionForInitialPayment(request.getInitialPayment());
 
-        String supplierCode = SupplierMapper.normalizeCode(request.getSupplierCode());
+        String supplierCode = SupplierCodePolicy.normalize(request.getSupplierCode());
         Supplier supplier = supplierRepository.findByCodeForUpdate(supplierCode)
             .orElseThrow(() -> new BusinessException(ErrorCode.SUPPLIER_NOT_FOUND, supplierCode));
         if (!supplier.isActive()) {
@@ -246,8 +246,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     @Transactional(readOnly = true)
     public Page<GoodsReceiptResponse> filterGoodsReceipts(
             FilterGoodsReceiptRequest request, Pageable pageable) {
-        FilterGoodsReceiptRequest effectiveRequest = request == null
-            ? new FilterGoodsReceiptRequest() : request;
+        FilterGoodsReceiptRequest effectiveRequest = normalizedFilters(request);
         if (effectiveRequest.getReceivedDateFrom() != null
                 && effectiveRequest.getReceivedDateTo() != null
                 && effectiveRequest.getReceivedDateFrom().isAfter(effectiveRequest.getReceivedDateTo())) {
@@ -256,13 +255,55 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         Specification<GoodsReceipt> spec = GoodsReceiptSpecification.filter(
             effectiveRequest, bloomProperties.getStoreZoneId());
         Page<GoodsReceipt> page = goodsReceiptRepository.findAll(spec, pageable);
+
+        if (page.isEmpty()) {
+            return new PageImpl<>(List.of(), pageable, page.getTotalElements());
+        }
+
+        List<Long> receiptIds = page.getContent().stream()
+            .map(GoodsReceipt::getId)
+            .toList();
+        Map<Long, GoodsReceipt> readModelsById = goodsReceiptRepository
+            .findReadModelsByIdIn(receiptIds)
+            .stream()
+            .collect(Collectors.toMap(GoodsReceipt::getId, receipt -> receipt));
         Map<Long, BigDecimal> paidByReceipt = supplierDebtCalculator.validPaidAmounts(
-            page.getContent().stream().map(GoodsReceipt::getId).toList());
-        List<GoodsReceiptResponse> responses = page.getContent().stream()
+            receiptIds);
+        List<GoodsReceiptResponse> responses = receiptIds.stream()
+            .map(id -> requireReadModel(readModelsById, id))
             .map(receipt -> mapResponse(
                 receipt, paidByReceipt.getOrDefault(receipt.getId(), BigDecimal.ZERO)))
             .collect(Collectors.toList());
         return new PageImpl<>(responses, pageable, page.getTotalElements());
+    }
+
+    private FilterGoodsReceiptRequest normalizedFilters(FilterGoodsReceiptRequest request) {
+        if (request == null) {
+            return new FilterGoodsReceiptRequest();
+        }
+        String supplierCode = request.getSupplierCode();
+        if (supplierCode != null && supplierCode.length() > SupplierCodePolicy.MAX_LENGTH) {
+            throw new IllegalArgumentException(
+                "Supplier code filter must not exceed "
+                    + SupplierCodePolicy.MAX_LENGTH + " characters");
+        }
+        return FilterGoodsReceiptRequest.builder()
+            .code(request.getCode())
+            .supplierCode(SupplierCodePolicy.normalizeOptional(supplierCode))
+            .supplierName(request.getSupplierName())
+            .receivedDateFrom(request.getReceivedDateFrom())
+            .receivedDateTo(request.getReceivedDateTo())
+            .build();
+    }
+
+    private GoodsReceipt requireReadModel(
+            Map<Long, GoodsReceipt> readModelsById, Long receiptId) {
+        GoodsReceipt receipt = readModelsById.get(receiptId);
+        if (receipt == null) {
+            throw new IllegalStateException(
+                "Goods receipt disappeared during read: " + receiptId);
+        }
+        return receipt;
     }
 
     private void validateRequestShape(CreateGoodsReceiptRequest request) {
@@ -309,7 +350,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     private String createRequestHash(CreateGoodsReceiptRequest request) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            updateHashField(digest, SupplierMapper.normalizeCode(request.getSupplierCode()));
+            updateHashField(digest, SupplierCodePolicy.normalize(request.getSupplierCode()));
             updateHashField(digest, request.getReceivedDate().toString());
             updateHashField(digest, canonicalOptional(request.getDescription()));
             updateInitialPaymentHash(digest, request.getInitialPayment());

@@ -4,13 +4,12 @@ import com.bloom.app.api.dto.request.supplier.CreateSupplierRequest;
 import com.bloom.app.api.dto.request.supplier.UpdateSupplierRequest;
 import com.bloom.app.api.dto.response.supplier.SupplierResponse;
 import com.bloom.app.domain.model.Supplier;
+import com.bloom.app.domain.validation.SupplierCodePolicy;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.MappingTarget;
 import org.mapstruct.Named;
 import org.mapstruct.NullValuePropertyMappingStrategy;
-
-import java.util.Locale;
 
 @Mapper(componentModel = "spring", nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
 public interface SupplierMapper {
@@ -32,7 +31,7 @@ public interface SupplierMapper {
 
     @Named("supplierCode")
     static String normalizeCode(String code) {
-        return code.trim().toUpperCase(Locale.ROOT);
+        return SupplierCodePolicy.normalize(code);
     }
 
     @Named("requiredText")

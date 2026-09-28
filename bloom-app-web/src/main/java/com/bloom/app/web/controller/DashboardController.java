@@ -31,7 +31,8 @@ public class DashboardController {
     @GetMapping("/operational-overview")
     @Operation(
         summary = "Get the Release 1 operational dashboard",
-        description = "Returns sales today, current drawer-session operations, and supplier payables. " +
+        description = "Returns sales today, seven-day sales history, STORE stock attention, " +
+            "current drawer-session operations, and supplier payables. " +
             "Every authenticated Bloom user may read this endpoint."
     )
     public ResponseEntity<ApiResponse<OperationalDashboardResponse>> getOperationalOverview() {

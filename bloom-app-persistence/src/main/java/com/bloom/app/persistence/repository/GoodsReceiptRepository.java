@@ -12,6 +12,8 @@ import jakarta.persistence.LockModeType;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -49,6 +51,10 @@ public interface GoodsReceiptRepository extends JpaRepository<GoodsReceipt, Long
     @EntityGraph(attributePaths = {"supplier", "items", "items.item", "items.item.category"})
     @Query("SELECT receipt FROM GoodsReceipt receipt WHERE receipt.code = :code")
     Optional<GoodsReceipt> findDetailsByCode(@Param("code") String code);
+
+    @EntityGraph(attributePaths = {"supplier", "items", "items.item", "items.item.category"})
+    @Query("SELECT DISTINCT receipt FROM GoodsReceipt receipt WHERE receipt.id IN :ids")
+    List<GoodsReceipt> findReadModelsByIdIn(@Param("ids") Collection<Long> ids);
 
     @EntityGraph(attributePaths = {"supplier"})
     @Query("SELECT receipt FROM GoodsReceipt receipt WHERE receipt.code = :code")

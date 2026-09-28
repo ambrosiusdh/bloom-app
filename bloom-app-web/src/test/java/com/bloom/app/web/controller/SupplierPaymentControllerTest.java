@@ -42,10 +42,12 @@ class SupplierPaymentControllerTest {
 
     @Test
     void recordsPaymentWithIdempotencyHeader() throws Exception {
-        when(supplierPaymentService.createPayment(eq("GR-001"), eq("payment-001"), any()))
+        when(supplierPaymentService.createPayment(
+            eq("GR/IX-2026/0001"), eq("payment-001"), any()))
             .thenReturn(response(false));
 
-        mockMvc.perform(post("/api/goods-receipts/GR-001/payments")
+        mockMvc.perform(post("/api/goods-receipts/payments")
+                .queryParam("code", "GR/IX-2026/0001")
                 .header("Idempotency-Key", "payment-001")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -72,12 +74,14 @@ class SupplierPaymentControllerTest {
               "paidAt": "2026-08-26T08:00:00Z"
             }
             """;
-        mockMvc.perform(post("/api/goods-receipts/GR-001/payments")
+        mockMvc.perform(post("/api/goods-receipts/payments")
+                .queryParam("code", "GR/IX-2026/0001")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(validBody))
             .andExpect(status().isBadRequest());
 
-        mockMvc.perform(post("/api/goods-receipts/GR-001/payments")
+        mockMvc.perform(post("/api/goods-receipts/payments")
+                .queryParam("code", "GR/IX-2026/0001")
                 .header("Idempotency-Key", "payment-unsupported")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -88,17 +92,21 @@ class SupplierPaymentControllerTest {
                     }
                     """))
             .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/api/goods-receipts/payments"))
+            .andExpect(status().isBadRequest());
     }
 
     @Test
     void returnsFullHistoryAndVoidsWithoutDeleteEndpoint() throws Exception {
         when(supplierPaymentService.getReceiptPaymentHistory(
-            "GR-001", PageRequest.of(0, 10)))
+            "GR/IX-2026/0001", PageRequest.of(0, 10)))
             .thenReturn(new PageImpl<>(List.of(response(false)), PageRequest.of(0, 10), 1));
         when(supplierPaymentService.voidPayment(eq(41L), any()))
             .thenReturn(response(true));
 
-        mockMvc.perform(get("/api/goods-receipts/GR-001/payments")
+        mockMvc.perform(get("/api/goods-receipts/payments")
+                .queryParam("code", "GR/IX-2026/0001")
                 .queryParam("page", "1")
                 .queryParam("size", "10"))
             .andExpect(status().isOk())
@@ -110,6 +118,35 @@ class SupplierPaymentControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.voided").value(true))
             .andExpect(jsonPath("$.data.voidReason").value("Duplicate transfer"));
+    }
+
+    @Test
+    void retainsLegacyPaymentRoutesForBackwardCompatibility() throws Exception {
+        when(supplierPaymentService.createPayment(
+            eq("GR-001"), eq("legacy-payment"), any()))
+            .thenReturn(response(false));
+        when(supplierPaymentService.getReceiptPaymentHistory(
+            "GR-001", PageRequest.of(0, 10)))
+            .thenReturn(new PageImpl<>(List.of(response(false)), PageRequest.of(0, 10), 1));
+
+        mockMvc.perform(post("/api/goods-receipts/GR-001/payments")
+                .header("Idempotency-Key", "legacy-payment")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {
+                      "amount": 25.0000,
+                      "paymentMethod": "BANK_TRANSFER",
+                      "paidAt": "2026-08-26T08:00:00Z"
+                    }
+                    """))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.id").value(41));
+
+        mockMvc.perform(get("/api/goods-receipts/GR-001/payments")
+                .queryParam("page", "1")
+                .queryParam("size", "10"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.content[0].id").value(41));
     }
 
     private SupplierPaymentResponse response(boolean voided) {
