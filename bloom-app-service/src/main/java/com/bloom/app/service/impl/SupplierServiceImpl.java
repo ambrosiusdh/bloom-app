@@ -8,6 +8,7 @@ import com.bloom.app.api.dto.response.supplier.SupplierOutstandingBalanceRespons
 import com.bloom.app.domain.error.ErrorCode;
 import com.bloom.app.domain.exception.BusinessException;
 import com.bloom.app.domain.model.Supplier;
+import com.bloom.app.domain.validation.SupplierCodePolicy;
 import com.bloom.app.persistence.projection.SupplierBalanceTotals;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
 import com.bloom.app.persistence.repository.SupplierRepository;
@@ -36,7 +37,7 @@ public class SupplierServiceImpl implements SupplierService {
     @Override
     @Transactional
     public SupplierResponse createSupplier(CreateSupplierRequest request) {
-        String code = SupplierMapper.normalizeCode(request.getCode());
+        String code = SupplierCodePolicy.normalize(request.getCode());
         log.debug("Creating supplier with code: {}", code);
         assertCodeAvailable(code);
 
@@ -118,7 +119,7 @@ public class SupplierServiceImpl implements SupplierService {
     }
 
     private Supplier findSupplier(String code) {
-        String normalizedCode = SupplierMapper.normalizeCode(code);
+        String normalizedCode = SupplierCodePolicy.normalize(code);
         return supplierRepository.findByCode(normalizedCode)
             .orElseThrow(() -> new BusinessException(ErrorCode.SUPPLIER_NOT_FOUND, normalizedCode));
     }

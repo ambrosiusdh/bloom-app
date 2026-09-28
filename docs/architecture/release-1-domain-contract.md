@@ -336,6 +336,19 @@ Only a `CASH` supplier payment reduces drawer cash. It must belong to the curren
 
 The allocation rules for payments that cover more than one receipt, overpayments, and supplier credits are unresolved. Release 1 implementation must not invent those behaviors.
 
+The canonical supplier-payment routes carry the receipt code as a query parameter because receipt
+codes may contain `/`:
+
+```http
+POST /api/goods-receipts/payments?code=GR%2FIX-2026%2F0001
+GET  /api/goods-receipts/payments?code=GR%2FIX-2026%2F0001&page=0&size=20
+```
+
+The former `POST` and `GET /api/goods-receipts/{code}/payments` mappings remain as deprecated
+compatibility routes for existing clients with path-safe receipt codes. New clients must use the
+query-parameter routes. Omitting the required `code` query parameter returns the normal HTTP 400
+request-validation response.
+
 ### Goods-receipt calendar filter contract
 
 `GET /api/goods-receipts` accepts optional `receivedDateFrom` and `receivedDateTo` as ISO calendar
@@ -364,7 +377,8 @@ detail and payables drill-downs:
 GET /api/goods-receipts?supplierCode=SUP-001&page=1&size=20
 ```
 
-The backend trims the value and canonicalizes it to uppercase using the same locale-independent
+The backend strips leading and trailing Unicode whitespace and canonicalizes the value to uppercase
+using the same locale-independent
 supplier-code rule used by supplier create and lookup operations. A null, omitted, or blank value
 does not add a supplier predicate. The raw query value must not exceed 255 characters; a longer
 value returns the normal HTTP 400 validation response. A canonical code that does not exist returns
@@ -929,7 +943,9 @@ At the beginning of one read, the service captures exactly one `asOf` from its i
 It derives `businessDate` in the configured store zone, `periodStart` at the start of that date,
 and `periodEndExclusive` at the start of the next date. It returns
 `freshUntil = asOf + bloom.dashboard.freshness`. No use of the machine default time zone defines
-this store day.
+this store day. The complete operational overview is read in one read-only PostgreSQL
+`REPEATABLE READ` transaction, so its aggregate and preview queries observe one consistent database
+snapshot even when sales, stock, payments, or cash-session data changes concurrently.
 
 The Dashboard stock-attention threshold is explicitly `bloom.low-stock-threshold`, currently
 configured as the `BigDecimal` value `10`. The threshold is exclusive: a positive STORE balance

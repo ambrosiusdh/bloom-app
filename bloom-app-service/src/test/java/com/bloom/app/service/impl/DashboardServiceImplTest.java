@@ -22,6 +22,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -55,6 +57,17 @@ class DashboardServiceImplTest {
     private DashboardProperties properties;
     private Instant asOf;
     private DashboardServiceImpl service;
+
+    @Test
+    void operationalReadUsesOneRepeatableReadDatabaseSnapshot() throws Exception {
+        Transactional transaction = DashboardServiceImpl.class
+            .getMethod("getOperationalOverview")
+            .getAnnotation(Transactional.class);
+
+        assertThat(transaction).isNotNull();
+        assertThat(transaction.readOnly()).isTrue();
+        assertThat(transaction.isolation()).isEqualTo(Isolation.REPEATABLE_READ);
+    }
 
     @BeforeEach
     void setUp() {

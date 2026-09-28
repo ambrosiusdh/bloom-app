@@ -102,11 +102,13 @@ class OperationalDashboardPostgreSqlIntegrationTest {
                 "2026-03-07", "2026-03-08", "2026-03-09");
         assertThat(rows.get(0).getSalesAmount()).isEqualByComparingTo("0");
         assertThat(rows.get(0).getTransactionCount()).isZero();
+        assertThat(rows.get(4).getSalesAmount()).isEqualByComparingTo("9.0000");
+        assertThat(rows.get(4).getTransactionCount()).isEqualTo(1);
         assertThat(rows.get(5).getSalesAmount()).isEqualByComparingTo("3.3333");
         assertThat(rows.get(5).getTransactionCount()).isEqualTo(2);
         assertThat(rows.get(6).getSalesAmount()).isEqualByComparingTo("4.4444");
-        assertThat(rows.get(0).getPeriodSalesAmount()).isEqualByComparingTo("7.7777");
-        assertThat(rows.get(0).getPeriodTransactionCount()).isEqualTo(3);
+        assertThat(rows.get(0).getPeriodSalesAmount()).isEqualByComparingTo("16.7777");
+        assertThat(rows.get(0).getPeriodTransactionCount()).isEqualTo(4);
     }
 
     @Test

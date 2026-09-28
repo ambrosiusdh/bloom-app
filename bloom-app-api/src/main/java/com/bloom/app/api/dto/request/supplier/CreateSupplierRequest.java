@@ -1,5 +1,6 @@
 package com.bloom.app.api.dto.request.supplier;
 
+import com.bloom.app.domain.validation.SupplierCodePolicy;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -17,7 +18,11 @@ public class CreateSupplierRequest {
     private String name;
 
     @NotBlank(message = "Supplier code is required")
-    @Size(max = 255, message = "Supplier code must not exceed 255 characters")
+    @Size(
+        max = SupplierCodePolicy.MAX_LENGTH,
+        message = "Supplier code must not exceed "
+            + SupplierCodePolicy.MAX_LENGTH + " characters"
+    )
     private String code;
 
     @Size(max = 255, message = "Supplier contact number must not exceed 255 characters")

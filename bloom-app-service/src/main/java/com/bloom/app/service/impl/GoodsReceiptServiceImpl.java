@@ -22,6 +22,7 @@ import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.Supplier;
 import com.bloom.app.domain.properties.BloomProperties;
 import com.bloom.app.domain.validation.InventoryQuantityValidator;
+import com.bloom.app.domain.validation.SupplierCodePolicy;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
 import com.bloom.app.persistence.repository.CashSessionRepository;
 import com.bloom.app.persistence.repository.ItemRepository;
@@ -31,7 +32,6 @@ import com.bloom.app.service.GoodsReceiptService;
 import com.bloom.app.service.StockMovementService;
 import com.bloom.app.service.SupplierPaymentService;
 import com.bloom.app.service.mapper.GoodsReceiptMapper;
-import com.bloom.app.service.mapper.SupplierMapper;
 import com.bloom.app.service.specification.GoodsReceiptSpecification;
 import com.bloom.app.service.util.CashMoneyUtil;
 import com.bloom.app.service.util.CurrentActorProvider;
@@ -67,7 +67,6 @@ import java.util.stream.Collectors;
 public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 100;
     private static final int MAX_RECEIPT_CODE_LENGTH = 100;
-    private static final int MAX_SUPPLIER_CODE_LENGTH = 255;
 
     private final GoodsReceiptRepository goodsReceiptRepository;
     private final CashSessionRepository cashSessionRepository;
@@ -107,7 +106,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         }
         lockCashSessionForInitialPayment(request.getInitialPayment());
 
-        String supplierCode = SupplierMapper.normalizeCode(request.getSupplierCode());
+        String supplierCode = SupplierCodePolicy.normalize(request.getSupplierCode());
         Supplier supplier = supplierRepository.findByCodeForUpdate(supplierCode)
             .orElseThrow(() -> new BusinessException(ErrorCode.SUPPLIER_NOT_FOUND, supplierCode));
         if (!supplier.isActive()) {
@@ -283,13 +282,14 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             return new FilterGoodsReceiptRequest();
         }
         String supplierCode = request.getSupplierCode();
-        if (supplierCode != null && supplierCode.length() > MAX_SUPPLIER_CODE_LENGTH) {
+        if (supplierCode != null && supplierCode.length() > SupplierCodePolicy.MAX_LENGTH) {
             throw new IllegalArgumentException(
-                "Supplier code filter must not exceed 255 characters");
+                "Supplier code filter must not exceed "
+                    + SupplierCodePolicy.MAX_LENGTH + " characters");
         }
         return FilterGoodsReceiptRequest.builder()
             .code(request.getCode())
-            .supplierCode(GoodsReceiptSpecification.normalizeSupplierCode(supplierCode))
+            .supplierCode(SupplierCodePolicy.normalizeOptional(supplierCode))
             .supplierName(request.getSupplierName())
             .receivedDateFrom(request.getReceivedDateFrom())
             .receivedDateTo(request.getReceivedDateTo())
@@ -350,7 +350,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     private String createRequestHash(CreateGoodsReceiptRequest request) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            updateHashField(digest, SupplierMapper.normalizeCode(request.getSupplierCode()));
+            updateHashField(digest, SupplierCodePolicy.normalize(request.getSupplierCode()));
             updateHashField(digest, request.getReceivedDate().toString());
             updateHashField(digest, canonicalOptional(request.getDescription()));
             updateInitialPaymentHash(digest, request.getInitialPayment());

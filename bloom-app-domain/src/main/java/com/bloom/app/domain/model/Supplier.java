@@ -1,5 +1,6 @@
 package com.bloom.app.domain.model;
 
+import com.bloom.app.domain.validation.SupplierCodePolicy;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -30,7 +31,13 @@ public class Supplier {
     @Column(name = "name", nullable = false, length = 255)
     private String name;
 
-    @Column(name = "code", unique = true, nullable = false, length = 255, updatable = false)
+    @Column(
+        name = "code",
+        unique = true,
+        nullable = false,
+        length = SupplierCodePolicy.MAX_LENGTH,
+        updatable = false
+    )
     private String code;
 
     @Column(name = "contact_number", length = 255)

@@ -1,5 +1,6 @@
 package com.bloom.app.api.dto.request.supplier;
 
+import com.bloom.app.domain.validation.SupplierCodePolicy;
 import jakarta.validation.constraints.Size;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
@@ -15,7 +16,11 @@ public class FilterSupplierRequest {
     @Size(max = 255, message = "Supplier search must not exceed 255 characters")
     private String query;
 
-    @Size(max = 255, message = "Supplier code filter must not exceed 255 characters")
+    @Size(
+        max = SupplierCodePolicy.MAX_LENGTH,
+        message = "Supplier code filter must not exceed "
+            + SupplierCodePolicy.MAX_LENGTH + " characters"
+    )
     private String code;
 
     @Size(max = 255, message = "Supplier name filter must not exceed 255 characters")
