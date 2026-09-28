@@ -14,6 +14,8 @@ public class OperationalDashboardResponse {
     LocalDate businessDate;
     String storeZoneId;
     DashboardSalesTodayResponse salesToday;
+    DashboardSalesLast7DaysResponse salesLast7Days;
+    DashboardStockAttentionResponse stockAttention;
     DashboardCurrentCashSessionResponse currentCashSession;
     DashboardSupplierPayablesResponse supplierPayables;
 }

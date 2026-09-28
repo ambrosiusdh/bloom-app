@@ -68,9 +68,12 @@ public class GoodsReceiptController {
     }
 
     @GetMapping
-    @Operation(summary = "Filter Goods Receipt", description = "Filter and paginate goods receipts.")
+    @Operation(
+        summary = "Filter Goods Receipt",
+        description = "Filter and paginate goods receipts, optionally by exact stable supplier code."
+    )
     public ResponseEntity<ApiResponse<Page<GoodsReceiptResponse>>> filterGoodsReceipts(
-        @ModelAttribute FilterGoodsReceiptRequest request,
+        @Valid @ModelAttribute FilterGoodsReceiptRequest request,
         Pageable pageable
     ) {
         Page<GoodsReceiptResponse> page = goodsReceiptService.filterGoodsReceipts(request, PagingHelper.toPageRequest(pageable));

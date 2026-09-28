@@ -6,6 +6,7 @@ import com.bloom.app.api.dto.request.goodsreceipt.CreateGoodsReceiptRequest;
 import com.bloom.app.api.dto.request.goodsreceipt.FilterGoodsReceiptRequest;
 import com.bloom.app.api.dto.response.goodsreceipt.GoodsReceiptResponse;
 import com.bloom.app.api.dto.request.supplierpayment.CreateSupplierPaymentRequest;
+import com.bloom.app.api.dto.request.supplierpayment.VoidSupplierPaymentRequest;
 import com.bloom.app.domain.enums.GoodsReceiptStatus;
 import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.StockLocation;
@@ -30,17 +31,22 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.hibernate.SessionFactory;
+
+import jakarta.persistence.EntityManagerFactory;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -74,6 +80,9 @@ class GoodsReceiptPostgreSqlIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private EntityManagerFactory entityManagerFactory;
+
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
         if (POSTGRES != null) {
@@ -87,6 +96,7 @@ class GoodsReceiptPostgreSqlIntegrationTest {
             registry.add("spring.datasource.password",
                 () -> System.getProperty("bloom.test.database.password", "postgres"));
         }
+        registry.add("spring.jpa.properties.hibernate.generate_statistics", () -> "true");
     }
 
     @AfterEach
@@ -291,11 +301,155 @@ class GoodsReceiptPostgreSqlIntegrationTest {
             .doesNotContain(beforeStart.getCode(), atEnd.getCode());
     }
 
+    @Test
+    void supplierCodeFilterIsolatesStableIdentityAndPreservesPayableSemantics() {
+        authenticate();
+        String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        Supplier selected = supplier("GR-FILTER-" + suffix, "Shared Textile", true);
+        Supplier similarlyNamed = supplier(
+            "GR-FILTER-" + suffix + "-OTHER", "Shared Textile", true);
+        Item item = fractionalItem("RECEIPT-SUPPLIER-FILTER", "0.0000", "0.0000");
+
+        GoodsReceiptResponse unpaid = createReceiptAt(
+            selected, item, Instant.parse("2026-09-10T02:00:00Z"), "100.0000");
+        GoodsReceiptResponse partial = createReceiptAt(
+            selected, item, Instant.parse("2026-09-11T02:00:00Z"), "100.0000");
+        GoodsReceiptResponse paid = createReceiptAt(
+            selected, item, Instant.parse("2026-09-12T02:00:00Z"), "100.0000");
+        GoodsReceiptResponse voided = createReceiptAt(
+            selected, item, Instant.parse("2026-09-13T02:00:00Z"), "100.0000");
+        GoodsReceiptResponse cancelled = createReceiptAt(
+            selected, item, Instant.parse("2026-09-14T02:00:00Z"), "100.0000");
+        GoodsReceiptResponse otherSupplierReceipt = createReceiptAt(
+            similarlyNamed, item, Instant.parse("2026-09-12T03:00:00Z"), "100.0000");
+
+        supplierPaymentService.createPayment(
+            partial.getCode(), "supplier-filter-partial-" + UUID.randomUUID(),
+            payment("40.0000"));
+        supplierPaymentService.createPayment(
+            paid.getCode(), "supplier-filter-paid-" + UUID.randomUUID(),
+            payment("100.0000"));
+        var paymentToVoid = supplierPaymentService.createPayment(
+            voided.getCode(), "supplier-filter-void-" + UUID.randomUUID(),
+            payment("25.0000"));
+        supplierPaymentService.voidPayment(paymentToVoid.getId(),
+            VoidSupplierPaymentRequest.builder().reason("Duplicate transfer").build());
+        goodsReceiptService.cancelGoodsReceipt(cancelled.getCode(),
+            CancelGoodsReceiptRequest.builder().reason("Supplier return").build());
+
+        selected.setActive(false);
+        supplierRepository.saveAndFlush(selected);
+
+        var page = goodsReceiptService.filterGoodsReceipts(
+            FilterGoodsReceiptRequest.builder()
+                .supplierCode("  " + selected.getCode().toLowerCase() + "  ")
+                .build(),
+            PageRequest.of(0, 20, Sort.by("receivedDate").ascending()));
+
+        assertThat(page.getTotalElements()).isEqualTo(5);
+        assertThat(page.getContent()).extracting(GoodsReceiptResponse::getCode)
+            .containsExactly(
+                unpaid.getCode(), partial.getCode(), paid.getCode(),
+                voided.getCode(), cancelled.getCode())
+            .doesNotContain(otherSupplierReceipt.getCode());
+        assertThat(page.getContent()).allSatisfy(receipt -> {
+            assertThat(receipt.getSupplierCode()).isEqualTo(selected.getCode());
+            assertThat(receipt.getSupplierName()).isEqualTo("Shared Textile");
+            assertThat(receipt.getItems()).isNotEmpty();
+        });
+
+        Map<String, GoodsReceiptResponse> byCode = page.getContent().stream()
+            .collect(java.util.stream.Collectors.toMap(
+                GoodsReceiptResponse::getCode, receipt -> receipt));
+        assertThat(byCode.get(unpaid.getCode())).satisfies(receipt -> {
+            assertThat(receipt.getPaymentStatus()).isEqualTo(SupplierPaymentStatus.UNPAID);
+            assertThat(receipt.getPaidAmount()).isEqualByComparingTo("0.0000");
+            assertThat(receipt.getOutstandingAmount()).isEqualByComparingTo("100.0000");
+        });
+        assertThat(byCode.get(partial.getCode())).satisfies(receipt -> {
+            assertThat(receipt.getPaymentStatus()).isEqualTo(SupplierPaymentStatus.PARTIALLY_PAID);
+            assertThat(receipt.getPaidAmount()).isEqualByComparingTo("40.0000");
+            assertThat(receipt.getOutstandingAmount()).isEqualByComparingTo("60.0000");
+        });
+        assertThat(byCode.get(paid.getCode())).satisfies(receipt -> {
+            assertThat(receipt.getPaymentStatus()).isEqualTo(SupplierPaymentStatus.PAID);
+            assertThat(receipt.getPaidAmount()).isEqualByComparingTo("100.0000");
+            assertThat(receipt.getOutstandingAmount()).isEqualByComparingTo("0.0000");
+        });
+        assertThat(byCode.get(voided.getCode())).satisfies(receipt -> {
+            assertThat(receipt.getPaymentStatus()).isEqualTo(SupplierPaymentStatus.UNPAID);
+            assertThat(receipt.getPaidAmount()).isEqualByComparingTo("0.0000");
+            assertThat(receipt.getOutstandingAmount()).isEqualByComparingTo("100.0000");
+        });
+        assertThat(byCode.get(cancelled.getCode())).satisfies(receipt -> {
+            assertThat(receipt.getStatus()).isEqualTo(GoodsReceiptStatus.CANCELLED);
+            assertThat(receipt.getOutstandingAmount()).isEqualByComparingTo("0.0000");
+        });
+    }
+
+    @Test
+    void supplierCodeFilterCombinesWithExistingFiltersPagesAndReturnsEmptyWithoutNPlusOne() {
+        authenticate();
+        String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        Supplier supplier = supplier("GR-PAGE-" + suffix, "Paging Textile " + suffix, true);
+        Item item = fractionalItem("RECEIPT-SUPPLIER-PAGE", "0.0000", "0.0000");
+        GoodsReceiptResponse first = createReceiptAt(
+            supplier, item, Instant.parse("2026-09-11T17:00:00Z"), "10.0000");
+        GoodsReceiptResponse second = createReceiptAt(
+            supplier, item, Instant.parse("2026-09-12T02:00:00Z"), "20.0000");
+        GoodsReceiptResponse third = createReceiptAt(
+            supplier, item, Instant.parse("2026-09-12T16:59:59Z"), "30.0000");
+
+        var combined = goodsReceiptService.filterGoodsReceipts(
+            FilterGoodsReceiptRequest.builder()
+                .supplierCode(supplier.getCode())
+                .supplierName("Paging Textile")
+                .code(second.getCode())
+                .receivedDateFrom(LocalDate.parse("2026-09-12"))
+                .receivedDateTo(LocalDate.parse("2026-09-12"))
+                .build(),
+            PageRequest.of(0, 10));
+        assertThat(combined.getContent()).extracting(GoodsReceiptResponse::getCode)
+            .containsExactly(second.getCode());
+
+        var firstPage = goodsReceiptService.filterGoodsReceipts(
+            FilterGoodsReceiptRequest.builder().supplierCode(supplier.getCode()).build(),
+            PageRequest.of(0, 2, Sort.by("receivedDate").ascending()));
+        var secondPage = goodsReceiptService.filterGoodsReceipts(
+            FilterGoodsReceiptRequest.builder().supplierCode(supplier.getCode()).build(),
+            PageRequest.of(1, 2, Sort.by("receivedDate").ascending()));
+        assertThat(firstPage.getTotalElements()).isEqualTo(3);
+        assertThat(firstPage.getContent()).extracting(GoodsReceiptResponse::getCode)
+            .containsExactly(first.getCode(), second.getCode());
+        assertThat(secondPage.getContent()).extracting(GoodsReceiptResponse::getCode)
+            .containsExactly(third.getCode());
+
+        var statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.clear();
+        var completePage = goodsReceiptService.filterGoodsReceipts(
+            FilterGoodsReceiptRequest.builder().supplierCode(supplier.getCode()).build(),
+            PageRequest.of(0, 10, Sort.by("receivedDate").ascending()));
+        assertThat(completePage.getContent()).hasSize(3);
+        assertThat(statistics.getPrepareStatementCount()).isLessThanOrEqualTo(4L);
+
+        var missing = goodsReceiptService.filterGoodsReceipts(
+            FilterGoodsReceiptRequest.builder()
+                .supplierCode("MISSING-" + suffix)
+                .build(),
+            PageRequest.of(0, 10));
+        assertThat(missing.getTotalElements()).isZero();
+        assertThat(missing.getContent()).isEmpty();
+    }
+
     private Supplier supplier(boolean active) {
         String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        return supplier("GR-SUP-" + suffix, "Receipt Supplier " + suffix, active);
+    }
+
+    private Supplier supplier(String code, String name, boolean active) {
         return supplierRepository.saveAndFlush(Supplier.builder()
-            .code("GR-SUP-" + suffix)
-            .name("Receipt Supplier " + suffix)
+            .code(code)
+            .name(name)
             .active(active)
             .build());
     }
@@ -331,11 +485,24 @@ class GoodsReceiptPostgreSqlIntegrationTest {
 
     private GoodsReceiptResponse createReceiptAt(
             Supplier supplier, Item item, Instant receivedDate) {
+        return createReceiptAt(supplier, item, receivedDate, "1.0000");
+    }
+
+    private GoodsReceiptResponse createReceiptAt(
+            Supplier supplier, Item item, Instant receivedDate, String purchasePrice) {
         CreateGoodsReceiptRequest request = request(supplier.getCode(), List.of(
-            line(item.getSku(), "1.0000", "1.0000", StockLocation.STORE)));
+            line(item.getSku(), "1.0000", purchasePrice, StockLocation.STORE)));
         request.setReceivedDate(receivedDate);
         return goodsReceiptService.createGoodsReceipt(
             "goods-receipt-date-" + UUID.randomUUID(), request);
+    }
+
+    private CreateSupplierPaymentRequest payment(String amount) {
+        return CreateSupplierPaymentRequest.builder()
+            .amount(new BigDecimal(amount))
+            .paymentMethod(SupplierPaymentMethod.BANK_TRANSFER)
+            .paidAt(Instant.parse("2026-09-15T02:00:00Z"))
+            .build();
     }
 
     private CreateGoodsReceiptItemRequest line(

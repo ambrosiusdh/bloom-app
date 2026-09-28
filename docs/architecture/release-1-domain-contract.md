@@ -355,6 +355,34 @@ Clients preserve calendar dates in the URL and send them unchanged. They must no
 device-local `Date` construction. The specification remains one paged backend query and compares
 the persisted receipt `Instant` against the derived inclusive/exclusive boundaries.
 
+### Goods-receipt supplier-code filter contract
+
+`GET /api/goods-receipts` also accepts an optional `supplierCode` query parameter for supplier
+detail and payables drill-downs:
+
+```http
+GET /api/goods-receipts?supplierCode=SUP-001&page=1&size=20
+```
+
+The backend trims the value and canonicalizes it to uppercase using the same locale-independent
+supplier-code rule used by supplier create and lookup operations. A null, omitted, or blank value
+does not add a supplier predicate. The raw query value must not exceed 255 characters; a longer
+value returns the normal HTTP 400 validation response. A canonical code that does not exist returns
+a successful empty page rather than a supplier-not-found error.
+
+When present, `supplierCode` is an exact equality filter on the stable persisted `Supplier.code`
+linked by `GoodsReceipt.supplier`. It is not a contains search and it never matches the mutable
+supplier display name or the receipt's supplier-name snapshot. Inactive suppliers remain eligible,
+so their historical receipts are readable. The filter composes with `code`, `supplierName`,
+`receivedDateFrom`, and `receivedDateTo`, and preserves the endpoint's existing paging and requested
+sorting behavior.
+
+Each page continues to return the existing `GoodsReceiptResponse`. Receipt read models are loaded in
+bulk for the selected page, and non-voided supplier payments are aggregated in one bounded query for
+all selected receipt IDs. The backend remains authoritative for `totalAmount`, `paidAmount`,
+`outstandingAmount`, and `paymentStatus`; cancelled-receipt and voided-payment semantics are
+unchanged, and clients do not aggregate payable balances from receipt rows.
+
 ## Cash-session, sale, and expense contract
 
 ### Cash session
@@ -803,9 +831,10 @@ role distinction is introduced. Anonymous requests receive HTTP 401.
 
 This endpoint is distinct from the legacy `GET /api/dashboard/overview`. The legacy endpoint and
 its `DashboardResponse` remain available unchanged for FE-08 compatibility until the frontend
-migrates. The operational response contains exactly sales today, current cash-session operations,
-and supplier payables. None of its values is profit, profitability, margin, net income, loss,
-business health, revenue recognition, or a general accounting report.
+migrates. The operational response contains sales today, seven-day sales history, STORE stock
+attention, current cash-session operations, and supplier payables. None of its values is profit,
+profitability, margin, net income, loss, business health, revenue recognition, forecast, reorder
+quantity, or a general accounting report.
 
 ### Response fields and nullability
 
@@ -818,8 +847,14 @@ business health, revenue recognition, or a general accounting report.
 | `businessDate` | `LocalDate` | non-null |
 | `storeZoneId` | canonical zone-ID string | non-null |
 | `salesToday` | `DashboardSalesTodayResponse` | non-null |
+| `salesLast7Days` | `DashboardSalesLast7DaysResponse` | non-null |
+| `stockAttention` | `DashboardStockAttentionResponse` | non-null |
 | `currentCashSession` | `DashboardCurrentCashSessionResponse` | non-null |
 | `supplierPayables` | `DashboardSupplierPayablesResponse` | non-null |
+
+`salesLast7Days` and `stockAttention` are additive fields that existing clients may ignore, but a
+successful response always includes both as non-null objects. `null` never represents an ordinary
+empty state for either section.
 
 `DashboardSalesTodayResponse` contains:
 
@@ -830,6 +865,43 @@ business health, revenue recognition, or a general accounting report.
 | `periodStart` | UTC `Instant` | non-null |
 | `periodEndExclusive` | UTC `Instant` | non-null |
 | `drillDown` | `DashboardDrillDownResponse` | non-null |
+
+`DashboardSalesLast7DaysResponse` contains:
+
+| Field | Type | Nullability and meaning |
+|---|---|---|
+| `periodStartDate` | `LocalDate` | non-null; `businessDate - 6 days` |
+| `periodEndDate` | `LocalDate` | non-null; equal to outer `businessDate` |
+| `totalSalesAmount` | `BigDecimal` JSON number | non-null and non-negative; database period total; zero when empty |
+| `totalTransactionCount` | integer | non-null and non-negative; database period count; zero when empty |
+| `days` | array of `DashboardSalesDayResponse` | non-null; exactly seven rows ordered oldest to newest |
+| `drillDown` | `DashboardDrillDownResponse` | non-null |
+
+Each `DashboardSalesDayResponse` contains non-null `LocalDate businessDate`, non-negative
+`BigDecimal salesAmount`, non-negative integer `transactionCount`, UTC `Instant periodStart`, and
+UTC `Instant periodEndExclusive`. The seven dates are consecutive store-zone calendar dates from
+`periodStartDate` through `periodEndDate`, inclusive. A date without a sale is an explicit row with
+numeric zero amount and count. Each row's half-open instant interval is the configured store-zone
+start of that date through the configured store-zone start of its next date; a daylight-offset
+transition may therefore produce a duration other than 24 hours.
+
+`DashboardStockAttentionResponse` contains:
+
+| Field | Type | Nullability and meaning |
+|---|---|---|
+| `outOfStockCount` | integer | non-null and non-negative; active STORE items with `stockStore <= 0` |
+| `lowStockCount` | integer | non-null and non-negative; active STORE items with `stockStore > 0 && stockStore < threshold` |
+| `threshold` | `BigDecimal` JSON number | non-null; exact configured `bloom.low-stock-threshold` |
+| `location` | `StockLocation` | non-null and exactly `STORE` |
+| `preview` | array of `DashboardStockAttentionItemResponse` | non-null; zero through three rows |
+| `drillDown` | `DashboardDrillDownResponse` | non-null semantic item-list destination |
+
+Each preview row contains non-null stable `Long itemId`, non-null `sku`, non-null `name`, non-null
+`UnitOfMeasure baseUnitOfMeasure`, exact non-null `BigDecimal stockStore`, and non-null state
+`OUT_OF_STOCK` or `LOW_STOCK`. Rows sort by state severity (`OUT_OF_STOCK` first), then exact
+`stockStore` ascending, then stable `itemId` ascending. Inactive items are excluded. The preview is
+empty when no active item matches. `stockWarehouse` is neither returned nor included in any count,
+state, or sort; WAREHOUSE availability cannot hide a STORE shortage.
 
 `DashboardCurrentCashSessionResponse` contains `state`, `sessionId`, `openedAt`, `openedBy`,
 `openingCash`, `totalCashIn`, `totalCashOut`, `expectedClosingCash`, `activeExpenseAmount`,
@@ -859,10 +931,17 @@ and `periodEndExclusive` at the start of the next date. It returns
 `freshUntil = asOf + bloom.dashboard.freshness`. No use of the machine default time zone defines
 this store day.
 
+The Dashboard stock-attention threshold is explicitly `bloom.low-stock-threshold`, currently
+configured as the `BigDecimal` value `10`. The threshold is exclusive: a positive STORE balance
+exactly equal to the threshold is not low stock. Although Release 1 stock invariants
+prevent negative balances, the Dashboard deliberately retains the defensive `stockStore <= 0`
+out-of-stock definition.
+
 `asOf` identifies the instant used for the date and interval. A client may retain a prior successful
 response after a later request fails, and labels it stale when its clock is later than `freshUntil`.
 The response deliberately has no `isStale` flag. A database/query failure uses the normal API error
-behavior and does not silently return a server-cached response.
+behavior, does not silently return a server-cached response, and never returns a partially
+authoritative Dashboard assembled from the queries that happened to succeed.
 
 ### Metric definitions
 
@@ -872,6 +951,20 @@ behavior and does not silently return a server-cached response.
 this is a persisted sales total. It is not cash tendered, cash received, profit, revenue
 recognition, or an accounting adjustment. Expenses, payables, discounts, cash change, and QRIS
 values are not subtracted or otherwise applied again.
+
+**Sales last seven days.** The period ends at the outer `businessDate` and starts six store-zone
+calendar dates earlier. Daily amounts and counts are calculated by one bounded PostgreSQL query
+that generates all seven calendar dates, joins persisted sales to each date's half-open store-zone
+interval, and returns explicit zero rows. Authoritative period amount and count are calculated in
+that same query set with database window aggregates; the frontend is never asked to add day rows,
+and sale entities are not loaded. This definition preserves fractional monetary values without
+conversion through binary floating point.
+
+**Stock attention.** This is immediate cashier availability at `StockLocation.STORE`, not total
+inventory. One bounded aggregate query returns the two counts and one bounded query returns at most
+three projected preview rows. Both queries filter `items.active = true`, use only `stock_store`, and
+do not load item graphs or perform per-row reads. No reorder recommendation, reorder quantity,
+forecast, due date, health score, or item-level reorder configuration is implied.
 
 **Current cash-session operations.** When the globally open session exists, `totalCashIn`,
 `totalCashOut`, and live `expectedClosingCash` come from the existing
@@ -897,13 +990,16 @@ Only these combinations are valid:
 | Metric/state | `destination` | `reference` | `startDate` | `endDate` |
 |---|---|---|---|---|
 | Sales today | `SALES_HISTORY` | `null` | `businessDate` | `businessDate` |
+| Sales last seven days | `SALES_HISTORY` | `null` | `periodStartDate` | `periodEndDate` |
+| Stock attention | `ITEM_LIST` | `null` | `null` | `null` |
 | Open session | `CASH_SESSION_DETAIL` | decimal `sessionId` string | `null` | `null` |
 | Open-session expenses | `EXPENSE_HISTORY` | `null` | `null` | `null` |
 | No open session | `CASH_SESSION_HISTORY` | `null` | `null` | `null` |
 | Supplier payables | `PAYABLES` | `null` | `null` | `null` |
 
 An `OPEN` session returns the detail and expense drill-downs. A `NONE` session returns a list
-containing only the cash-session-history destination.
+containing only the cash-session-history destination. `ITEM_LIST` maps to the already implemented
+authenticated item list and supplies no unsupported stock-state filter or frontend URL.
 
 ### Populated example with an open session
 
@@ -928,6 +1024,45 @@ containing only the cash-session-history destination.
         "startDate": "2026-09-12",
         "endDate": "2026-09-12"
       }
+    },
+    "salesLast7Days": {
+      "periodStartDate": "2026-09-06",
+      "periodEndDate": "2026-09-12",
+      "totalSalesAmount": 450000.3750,
+      "totalTransactionCount": 20,
+      "days": [
+        {
+          "businessDate": "2026-09-06",
+          "salesAmount": 0.0000,
+          "transactionCount": 0,
+          "periodStart": "2026-09-05T17:00:00Z",
+          "periodEndExclusive": "2026-09-06T17:00:00Z"
+        },
+        {
+          "businessDate": "2026-09-07",
+          "salesAmount": 200000.2500,
+          "transactionCount": 8,
+          "periodStart": "2026-09-06T17:00:00Z",
+          "periodEndExclusive": "2026-09-07T17:00:00Z"
+        },
+        { "businessDate": "2026-09-08", "salesAmount": 0.0000, "transactionCount": 0, "periodStart": "2026-09-07T17:00:00Z", "periodEndExclusive": "2026-09-08T17:00:00Z" },
+        { "businessDate": "2026-09-09", "salesAmount": 0.0000, "transactionCount": 0, "periodStart": "2026-09-08T17:00:00Z", "periodEndExclusive": "2026-09-09T17:00:00Z" },
+        { "businessDate": "2026-09-10", "salesAmount": 0.0000, "transactionCount": 0, "periodStart": "2026-09-09T17:00:00Z", "periodEndExclusive": "2026-09-10T17:00:00Z" },
+        { "businessDate": "2026-09-11", "salesAmount": 0.0000, "transactionCount": 0, "periodStart": "2026-09-10T17:00:00Z", "periodEndExclusive": "2026-09-11T17:00:00Z" },
+        { "businessDate": "2026-09-12", "salesAmount": 250000.1250, "transactionCount": 12, "periodStart": "2026-09-11T17:00:00Z", "periodEndExclusive": "2026-09-12T17:00:00Z" }
+      ],
+      "drillDown": { "destination": "SALES_HISTORY", "reference": null, "startDate": "2026-09-06", "endDate": "2026-09-12" }
+    },
+    "stockAttention": {
+      "outOfStockCount": 1,
+      "lowStockCount": 2,
+      "threshold": 10.0000,
+      "location": "STORE",
+      "preview": [
+        { "itemId": 41, "sku": "KAIN-001", "name": "Kain A", "baseUnitOfMeasure": "METER", "stockStore": 0.0000, "state": "OUT_OF_STOCK" },
+        { "itemId": 52, "sku": "KAIN-002", "name": "Kain B", "baseUnitOfMeasure": "METER", "stockStore": 0.2500, "state": "LOW_STOCK" }
+      ],
+      "drillDown": { "destination": "ITEM_LIST", "reference": null, "startDate": null, "endDate": null }
     },
     "currentCashSession": {
       "state": "OPEN",
@@ -992,6 +1127,30 @@ containing only the cash-session-history destination.
         "startDate": "2026-09-12",
         "endDate": "2026-09-12"
       }
+    },
+    "salesLast7Days": {
+      "periodStartDate": "2026-09-06",
+      "periodEndDate": "2026-09-12",
+      "totalSalesAmount": 0.0000,
+      "totalTransactionCount": 0,
+      "days": [
+        { "businessDate": "2026-09-06", "salesAmount": 0.0000, "transactionCount": 0, "periodStart": "2026-09-05T17:00:00Z", "periodEndExclusive": "2026-09-06T17:00:00Z" },
+        { "businessDate": "2026-09-07", "salesAmount": 0.0000, "transactionCount": 0, "periodStart": "2026-09-06T17:00:00Z", "periodEndExclusive": "2026-09-07T17:00:00Z" },
+        { "businessDate": "2026-09-08", "salesAmount": 0.0000, "transactionCount": 0, "periodStart": "2026-09-07T17:00:00Z", "periodEndExclusive": "2026-09-08T17:00:00Z" },
+        { "businessDate": "2026-09-09", "salesAmount": 0.0000, "transactionCount": 0, "periodStart": "2026-09-08T17:00:00Z", "periodEndExclusive": "2026-09-09T17:00:00Z" },
+        { "businessDate": "2026-09-10", "salesAmount": 0.0000, "transactionCount": 0, "periodStart": "2026-09-09T17:00:00Z", "periodEndExclusive": "2026-09-10T17:00:00Z" },
+        { "businessDate": "2026-09-11", "salesAmount": 0.0000, "transactionCount": 0, "periodStart": "2026-09-10T17:00:00Z", "periodEndExclusive": "2026-09-11T17:00:00Z" },
+        { "businessDate": "2026-09-12", "salesAmount": 0.0000, "transactionCount": 0, "periodStart": "2026-09-11T17:00:00Z", "periodEndExclusive": "2026-09-12T17:00:00Z" }
+      ],
+      "drillDown": { "destination": "SALES_HISTORY", "reference": null, "startDate": "2026-09-06", "endDate": "2026-09-12" }
+    },
+    "stockAttention": {
+      "outOfStockCount": 0,
+      "lowStockCount": 0,
+      "threshold": 10.0000,
+      "location": "STORE",
+      "preview": [],
+      "drillDown": { "destination": "ITEM_LIST", "reference": null, "startDate": null, "endDate": null }
     },
     "currentCashSession": {
       "state": "NONE",

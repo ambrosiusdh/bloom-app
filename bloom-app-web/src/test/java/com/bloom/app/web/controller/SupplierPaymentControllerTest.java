@@ -42,10 +42,12 @@ class SupplierPaymentControllerTest {
 
     @Test
     void recordsPaymentWithIdempotencyHeader() throws Exception {
-        when(supplierPaymentService.createPayment(eq("GR-001"), eq("payment-001"), any()))
+        when(supplierPaymentService.createPayment(
+            eq("GR/IX-2026/0001"), eq("payment-001"), any()))
             .thenReturn(response(false));
 
-        mockMvc.perform(post("/api/goods-receipts/GR-001/payments")
+        mockMvc.perform(post("/api/goods-receipts/payments")
+                .queryParam("code", "GR/IX-2026/0001")
                 .header("Idempotency-Key", "payment-001")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -72,12 +74,14 @@ class SupplierPaymentControllerTest {
               "paidAt": "2026-08-26T08:00:00Z"
             }
             """;
-        mockMvc.perform(post("/api/goods-receipts/GR-001/payments")
+        mockMvc.perform(post("/api/goods-receipts/payments")
+                .queryParam("code", "GR/IX-2026/0001")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(validBody))
             .andExpect(status().isBadRequest());
 
-        mockMvc.perform(post("/api/goods-receipts/GR-001/payments")
+        mockMvc.perform(post("/api/goods-receipts/payments")
+                .queryParam("code", "GR/IX-2026/0001")
                 .header("Idempotency-Key", "payment-unsupported")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
@@ -93,12 +97,13 @@ class SupplierPaymentControllerTest {
     @Test
     void returnsFullHistoryAndVoidsWithoutDeleteEndpoint() throws Exception {
         when(supplierPaymentService.getReceiptPaymentHistory(
-            "GR-001", PageRequest.of(0, 10)))
+            "GR/IX-2026/0001", PageRequest.of(0, 10)))
             .thenReturn(new PageImpl<>(List.of(response(false)), PageRequest.of(0, 10), 1));
         when(supplierPaymentService.voidPayment(eq(41L), any()))
             .thenReturn(response(true));
 
-        mockMvc.perform(get("/api/goods-receipts/GR-001/payments")
+        mockMvc.perform(get("/api/goods-receipts/payments")
+                .queryParam("code", "GR/IX-2026/0001")
                 .queryParam("page", "1")
                 .queryParam("size", "10"))
             .andExpect(status().isOk())

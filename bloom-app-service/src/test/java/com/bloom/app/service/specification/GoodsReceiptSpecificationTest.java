@@ -47,4 +47,12 @@ class GoodsReceiptSpecificationTest {
         assertThat(Duration.between(springStart, springEnd)).isEqualTo(Duration.ofHours(23));
         assertThat(Duration.between(autumnStart, autumnEnd)).isEqualTo(Duration.ofHours(25));
     }
+
+    @Test
+    void supplierCodeFilterUsesCanonicalExactSupplierIdentity() {
+        assertThat(GoodsReceiptSpecification.normalizeSupplierCode("  sup-001  "))
+            .isEqualTo("SUP-001");
+        assertThat(GoodsReceiptSpecification.normalizeSupplierCode("  ")).isNull();
+        assertThat(GoodsReceiptSpecification.normalizeSupplierCode(null)).isNull();
+    }
 }

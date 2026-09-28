@@ -7,7 +7,12 @@ import com.bloom.app.api.dto.response.dashboard.DashboardCurrentCashSessionRespo
 import com.bloom.app.api.dto.response.dashboard.DashboardDrillDownDestination;
 import com.bloom.app.api.dto.response.dashboard.DashboardDrillDownResponse;
 import com.bloom.app.api.dto.response.dashboard.DashboardResponse;
+import com.bloom.app.api.dto.response.dashboard.DashboardSalesDayResponse;
+import com.bloom.app.api.dto.response.dashboard.DashboardSalesLast7DaysResponse;
 import com.bloom.app.api.dto.response.dashboard.DashboardSalesTodayResponse;
+import com.bloom.app.api.dto.response.dashboard.DashboardStockAttentionItemResponse;
+import com.bloom.app.api.dto.response.dashboard.DashboardStockAttentionResponse;
+import com.bloom.app.api.dto.response.dashboard.DashboardStockAttentionState;
 import com.bloom.app.api.dto.response.dashboard.DashboardSupplierPayablesResponse;
 import com.bloom.app.api.dto.response.dashboard.LowStockDto;
 import com.bloom.app.api.dto.response.dashboard.OperationalDashboardResponse;
@@ -15,13 +20,17 @@ import com.bloom.app.api.dto.response.dashboard.RevenueChartDto;
 import com.bloom.app.api.dto.response.dashboard.SummaryDto;
 import com.bloom.app.api.dto.response.dashboard.TransactionDto;
 import com.bloom.app.domain.enums.CashSessionStatus;
+import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.model.CashSession;
 import com.bloom.app.domain.model.Sale;
 import com.bloom.app.domain.model.SaleItem;
+import com.bloom.app.domain.model.UnitOfMeasure;
 import com.bloom.app.domain.properties.BloomProperties;
 import com.bloom.app.domain.properties.DashboardProperties;
 import com.bloom.app.persistence.projection.DashboardExpenseTotals;
-import com.bloom.app.persistence.projection.DashboardSalesTodayTotals;
+import com.bloom.app.persistence.projection.DashboardSalesDayTotals;
+import com.bloom.app.persistence.projection.DashboardStockAttentionPreview;
+import com.bloom.app.persistence.projection.DashboardStockAttentionTotals;
 import com.bloom.app.persistence.projection.DashboardSupplierPayablesTotals;
 import com.bloom.app.persistence.projection.TopCategoryProjection;
 import com.bloom.app.persistence.repository.CashSessionRepository;
@@ -80,9 +89,19 @@ public class DashboardServiceImpl implements DashboardService {
         LocalDate businessDate = asOf.atZone(storeZone).toLocalDate();
         Instant periodStart = businessDate.atStartOfDay(storeZone).toInstant();
         Instant periodEndExclusive = businessDate.plusDays(1).atStartOfDay(storeZone).toInstant();
+        LocalDate historyStartDate = businessDate.minusDays(6);
 
-        DashboardSalesTodayTotals sales = saleRepository.summarizeOperationalSales(
-            periodStart, periodEndExclusive);
+        List<DashboardSalesDayTotals> salesRows =
+            saleRepository.summarizeOperationalSalesLast7Days(
+                historyStartDate, businessDate, storeZone.getId());
+        DashboardSalesLast7DaysResponse salesLast7Days = salesLast7Days(
+            salesRows, historyStartDate, businessDate, storeZone);
+        DashboardSalesDayResponse salesToday = salesLast7Days.getDays().getLast();
+        BigDecimal stockThreshold = bloomProperties.getLowStockThreshold();
+        DashboardStockAttentionTotals stockTotals =
+            itemRepository.summarizeDashboardStockAttention(stockThreshold);
+        List<DashboardStockAttentionPreview> stockPreview =
+            itemRepository.findDashboardStockAttentionPreview(stockThreshold);
         DashboardSupplierPayablesTotals payables =
             goodsReceiptRepository.summarizeOperationalPayables();
 
@@ -92,8 +111,8 @@ public class DashboardServiceImpl implements DashboardService {
             .businessDate(businessDate)
             .storeZoneId(storeZone.getId())
             .salesToday(DashboardSalesTodayResponse.builder()
-                .salesAmount(nonNegative(sales.getSalesAmount()))
-                .transactionCount(sales.getTransactionCount())
+                .salesAmount(salesToday.getSalesAmount())
+                .transactionCount(salesToday.getTransactionCount())
                 .periodStart(periodStart)
                 .periodEndExclusive(periodEndExclusive)
                 .drillDown(DashboardDrillDownResponse.builder()
@@ -102,12 +121,82 @@ public class DashboardServiceImpl implements DashboardService {
                     .endDate(businessDate)
                     .build())
                 .build())
+            .salesLast7Days(salesLast7Days)
+            .stockAttention(stockAttention(stockTotals, stockPreview, stockThreshold))
             .currentCashSession(currentCashSession())
             .supplierPayables(DashboardSupplierPayablesResponse.builder()
                 .outstandingAmount(nonNegative(payables.getOutstandingAmount()))
                 .openReceiptCount(payables.getOpenReceiptCount())
                 .drillDown(destination(DashboardDrillDownDestination.PAYABLES))
                 .build())
+            .build();
+    }
+
+    private DashboardSalesLast7DaysResponse salesLast7Days(
+            List<DashboardSalesDayTotals> rows,
+            LocalDate periodStartDate,
+            LocalDate periodEndDate,
+            ZoneId storeZone) {
+        Map<LocalDate, DashboardSalesDayTotals> rowsByDate = rows.stream()
+            .collect(Collectors.toMap(DashboardSalesDayTotals::getBusinessDate, row -> row));
+        List<DashboardSalesDayResponse> days = periodStartDate.datesUntil(
+                periodEndDate.plusDays(1))
+            .map(date -> salesDay(date, rowsByDate.get(date), storeZone))
+            .toList();
+        DashboardSalesDayTotals periodTotals = rows.isEmpty() ? null : rows.getFirst();
+
+        return DashboardSalesLast7DaysResponse.builder()
+            .periodStartDate(periodStartDate)
+            .periodEndDate(periodEndDate)
+            .totalSalesAmount(nonNegative(
+                periodTotals == null ? null : periodTotals.getPeriodSalesAmount()))
+            .totalTransactionCount(nonNegative(
+                periodTotals == null ? 0 : periodTotals.getPeriodTransactionCount()))
+            .days(days)
+            .drillDown(DashboardDrillDownResponse.builder()
+                .destination(DashboardDrillDownDestination.SALES_HISTORY)
+                .startDate(periodStartDate)
+                .endDate(periodEndDate)
+                .build())
+            .build();
+    }
+
+    private DashboardSalesDayResponse salesDay(
+            LocalDate date,
+            DashboardSalesDayTotals row,
+            ZoneId storeZone) {
+        return DashboardSalesDayResponse.builder()
+            .businessDate(date)
+            .salesAmount(nonNegative(row == null ? null : row.getSalesAmount()))
+            .transactionCount(nonNegative(row == null ? 0 : row.getTransactionCount()))
+            .periodStart(date.atStartOfDay(storeZone).toInstant())
+            .periodEndExclusive(date.plusDays(1).atStartOfDay(storeZone).toInstant())
+            .build();
+    }
+
+    private DashboardStockAttentionResponse stockAttention(
+            DashboardStockAttentionTotals totals,
+            List<DashboardStockAttentionPreview> preview,
+            BigDecimal threshold) {
+        return DashboardStockAttentionResponse.builder()
+            .outOfStockCount(nonNegative(totals.getOutOfStockCount()))
+            .lowStockCount(nonNegative(totals.getLowStockCount()))
+            .threshold(threshold)
+            .location(StockLocation.STORE)
+            .preview(preview.stream().map(this::stockAttentionItem).toList())
+            .drillDown(destination(DashboardDrillDownDestination.ITEM_LIST))
+            .build();
+    }
+
+    private DashboardStockAttentionItemResponse stockAttentionItem(
+            DashboardStockAttentionPreview row) {
+        return DashboardStockAttentionItemResponse.builder()
+            .itemId(row.getItemId())
+            .sku(row.getSku())
+            .name(row.getName())
+            .baseUnitOfMeasure(UnitOfMeasure.valueOf(row.getBaseUnitOfMeasure()))
+            .stockStore(row.getStockStore())
+            .state(DashboardStockAttentionState.valueOf(row.getState()))
             .build();
     }
 
@@ -158,6 +247,10 @@ public class DashboardServiceImpl implements DashboardService {
             return BigDecimal.ZERO;
         }
         return value;
+    }
+
+    private long nonNegative(long value) {
+        return Math.max(value, 0);
     }
 
     private List<SummaryDto> getSummaryCards() {

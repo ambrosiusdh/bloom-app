@@ -10,6 +10,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class GoodsReceiptSpecification {
     public static Specification<GoodsReceipt> filter(
@@ -20,6 +21,12 @@ public class GoodsReceiptSpecification {
             if (request.getCode() != null && !request.getCode().isEmpty()) {
                 predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("code")),
                         "%" + request.getCode().toLowerCase() + "%"));
+            }
+
+            String supplierCode = normalizeSupplierCode(request.getSupplierCode());
+            if (supplierCode != null) {
+                predicates.add(criteriaBuilder.equal(
+                    root.get("supplier").get("code"), supplierCode));
             }
 
             if (request.getSupplierName() != null && !request.getSupplierName().isEmpty()) {
@@ -47,5 +54,11 @@ public class GoodsReceiptSpecification {
 
     static Instant endExclusive(LocalDate date, ZoneId storeZone) {
         return date.plusDays(1).atStartOfDay(storeZone).toInstant();
+    }
+
+    public static String normalizeSupplierCode(String supplierCode) {
+        return supplierCode == null || supplierCode.isBlank()
+            ? null
+            : supplierCode.trim().toUpperCase(Locale.ROOT);
     }
 }

@@ -67,6 +67,7 @@ import java.util.stream.Collectors;
 public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     private static final int MAX_IDEMPOTENCY_KEY_LENGTH = 100;
     private static final int MAX_RECEIPT_CODE_LENGTH = 100;
+    private static final int MAX_SUPPLIER_CODE_LENGTH = 255;
 
     private final GoodsReceiptRepository goodsReceiptRepository;
     private final CashSessionRepository cashSessionRepository;
@@ -246,8 +247,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     @Transactional(readOnly = true)
     public Page<GoodsReceiptResponse> filterGoodsReceipts(
             FilterGoodsReceiptRequest request, Pageable pageable) {
-        FilterGoodsReceiptRequest effectiveRequest = request == null
-            ? new FilterGoodsReceiptRequest() : request;
+        FilterGoodsReceiptRequest effectiveRequest = normalizedFilters(request);
         if (effectiveRequest.getReceivedDateFrom() != null
                 && effectiveRequest.getReceivedDateTo() != null
                 && effectiveRequest.getReceivedDateFrom().isAfter(effectiveRequest.getReceivedDateTo())) {
@@ -256,13 +256,54 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         Specification<GoodsReceipt> spec = GoodsReceiptSpecification.filter(
             effectiveRequest, bloomProperties.getStoreZoneId());
         Page<GoodsReceipt> page = goodsReceiptRepository.findAll(spec, pageable);
+
+        if (page.isEmpty()) {
+            return new PageImpl<>(List.of(), pageable, page.getTotalElements());
+        }
+
+        List<Long> receiptIds = page.getContent().stream()
+            .map(GoodsReceipt::getId)
+            .toList();
+        Map<Long, GoodsReceipt> readModelsById = goodsReceiptRepository
+            .findReadModelsByIdIn(receiptIds)
+            .stream()
+            .collect(Collectors.toMap(GoodsReceipt::getId, receipt -> receipt));
         Map<Long, BigDecimal> paidByReceipt = supplierDebtCalculator.validPaidAmounts(
-            page.getContent().stream().map(GoodsReceipt::getId).toList());
-        List<GoodsReceiptResponse> responses = page.getContent().stream()
+            receiptIds);
+        List<GoodsReceiptResponse> responses = receiptIds.stream()
+            .map(id -> requireReadModel(readModelsById, id))
             .map(receipt -> mapResponse(
                 receipt, paidByReceipt.getOrDefault(receipt.getId(), BigDecimal.ZERO)))
             .collect(Collectors.toList());
         return new PageImpl<>(responses, pageable, page.getTotalElements());
+    }
+
+    private FilterGoodsReceiptRequest normalizedFilters(FilterGoodsReceiptRequest request) {
+        if (request == null) {
+            return new FilterGoodsReceiptRequest();
+        }
+        String supplierCode = request.getSupplierCode();
+        if (supplierCode != null && supplierCode.length() > MAX_SUPPLIER_CODE_LENGTH) {
+            throw new IllegalArgumentException(
+                "Supplier code filter must not exceed 255 characters");
+        }
+        return FilterGoodsReceiptRequest.builder()
+            .code(request.getCode())
+            .supplierCode(GoodsReceiptSpecification.normalizeSupplierCode(supplierCode))
+            .supplierName(request.getSupplierName())
+            .receivedDateFrom(request.getReceivedDateFrom())
+            .receivedDateTo(request.getReceivedDateTo())
+            .build();
+    }
+
+    private GoodsReceipt requireReadModel(
+            Map<Long, GoodsReceipt> readModelsById, Long receiptId) {
+        GoodsReceipt receipt = readModelsById.get(receiptId);
+        if (receipt == null) {
+            throw new IllegalStateException(
+                "Goods receipt disappeared during read: " + receiptId);
+        }
+        return receipt;
     }
 
     private void validateRequestShape(CreateGoodsReceiptRequest request) {

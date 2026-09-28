@@ -193,6 +193,28 @@ class GoodsReceiptControllerTest {
     }
 
     @Test
+    void bindsOptionalSupplierCodeAndRejectsValuesBeyondSupplierContractLimit() throws Exception {
+        when(goodsReceiptService.filterGoodsReceipts(any(), any())).thenReturn(
+            new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
+
+        mockMvc.perform(get("/api/goods-receipts")
+                .param("supplierCode", " sup-001 ")
+                .param("page", "1")
+                .param("size", "10"))
+            .andExpect(status().isOk());
+
+        ArgumentCaptor<FilterGoodsReceiptRequest> filter =
+            ArgumentCaptor.forClass(FilterGoodsReceiptRequest.class);
+        verify(goodsReceiptService).filterGoodsReceipts(filter.capture(), any(Pageable.class));
+        assertThat(filter.getValue().getSupplierCode()).isEqualTo(" sup-001 ");
+
+        mockMvc.perform(get("/api/goods-receipts")
+                .param("supplierCode", "S".repeat(256)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.errorType").value("ValidationFailed"));
+    }
+
+    @Test
     void mapsAnInvertedCalendarRangeToTheStandardBadRequestEnvelope() throws Exception {
         when(goodsReceiptService.filterGoodsReceipts(any(), any()))
             .thenThrow(new IllegalArgumentException(

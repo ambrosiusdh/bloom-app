@@ -5,12 +5,16 @@ import com.bloom.app.api.dto.response.dashboard.DashboardCashSessionState;
 import com.bloom.app.api.dto.response.dashboard.DashboardCurrentCashSessionResponse;
 import com.bloom.app.api.dto.response.dashboard.DashboardDrillDownDestination;
 import com.bloom.app.api.dto.response.dashboard.DashboardDrillDownResponse;
+import com.bloom.app.api.dto.response.dashboard.DashboardSalesDayResponse;
+import com.bloom.app.api.dto.response.dashboard.DashboardSalesLast7DaysResponse;
 import com.bloom.app.api.dto.response.dashboard.DashboardSalesTodayResponse;
+import com.bloom.app.api.dto.response.dashboard.DashboardStockAttentionResponse;
 import com.bloom.app.api.dto.response.dashboard.DashboardSupplierPayablesResponse;
 import com.bloom.app.api.dto.response.dashboard.OperationalDashboardResponse;
 import com.bloom.app.config.SecurityConfig;
 import com.bloom.app.domain.properties.CorsProperties;
 import com.bloom.app.domain.exception.UserNotFoundException;
+import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.model.User;
 import com.bloom.app.service.DashboardService;
 import com.bloom.app.service.UserService;
@@ -70,6 +74,8 @@ class OperationalDashboardSecurityTest {
         mockMvc.perform(get("/api/dashboard/operational-overview").session(session))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.data.salesLast7Days.days.length()").value(7))
+            .andExpect(jsonPath("$.data.stockAttention.location").value("STORE"))
             .andExpect(jsonPath("$.data.currentCashSession.state").value("NONE"));
 
         UserSessionData refreshed = (UserSessionData) session.getAttribute("currentUser");
@@ -132,6 +138,38 @@ class OperationalDashboardSecurityTest {
                 .periodStart(Instant.parse("2026-09-11T17:00:00Z"))
                 .periodEndExclusive(Instant.parse("2026-09-12T17:00:00Z"))
                 .drillDown(salesDrill)
+                .build())
+            .salesLast7Days(DashboardSalesLast7DaysResponse.builder()
+                .periodStartDate(date.minusDays(6))
+                .periodEndDate(date)
+                .totalSalesAmount(new BigDecimal("0.0000"))
+                .totalTransactionCount(0)
+                .days(date.minusDays(6).datesUntil(date.plusDays(1))
+                    .map(day -> DashboardSalesDayResponse.builder()
+                        .businessDate(day)
+                        .salesAmount(new BigDecimal("0.0000"))
+                        .transactionCount(0)
+                        .periodStart(day.atStartOfDay(java.time.ZoneId.of("Asia/Jakarta"))
+                            .toInstant())
+                        .periodEndExclusive(day.plusDays(1)
+                            .atStartOfDay(java.time.ZoneId.of("Asia/Jakarta")).toInstant())
+                        .build())
+                    .toList())
+                .drillDown(DashboardDrillDownResponse.builder()
+                    .destination(DashboardDrillDownDestination.SALES_HISTORY)
+                    .startDate(date.minusDays(6))
+                    .endDate(date)
+                    .build())
+                .build())
+            .stockAttention(DashboardStockAttentionResponse.builder()
+                .outOfStockCount(0)
+                .lowStockCount(0)
+                .threshold(new BigDecimal("10.0000"))
+                .location(StockLocation.STORE)
+                .preview(List.of())
+                .drillDown(DashboardDrillDownResponse.builder()
+                    .destination(DashboardDrillDownDestination.ITEM_LIST)
+                    .build())
                 .build())
             .currentCashSession(DashboardCurrentCashSessionResponse.builder()
                 .state(DashboardCashSessionState.NONE)

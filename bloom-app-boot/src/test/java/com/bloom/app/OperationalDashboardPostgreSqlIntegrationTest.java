@@ -2,6 +2,7 @@ package com.bloom.app;
 
 import com.bloom.app.persistence.repository.ExpenseRepository;
 import com.bloom.app.persistence.repository.GoodsReceiptRepository;
+import com.bloom.app.persistence.repository.ItemRepository;
 import com.bloom.app.persistence.repository.SaleRepository;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.util.UUID;
 
@@ -34,6 +37,9 @@ class OperationalDashboardPostgreSqlIntegrationTest {
 
     @Autowired
     private GoodsReceiptRepository goodsReceiptRepository;
+
+    @Autowired
+    private ItemRepository itemRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -74,6 +80,73 @@ class OperationalDashboardPostgreSqlIntegrationTest {
 
         assertThat(totals.getSalesAmount()).isEqualByComparingTo("5.5555");
         assertThat(totals.getTransactionCount()).isEqualTo(2);
+    }
+
+    @Test
+    void sevenDaySalesQueryReturnsZeroDaysAndTotalsAcrossDstOffsetChange() {
+        long sessionId = openSession();
+        insertSale(sessionId, Instant.parse("2026-03-08T04:59:59.999999Z"), "9.0000");
+        insertSale(sessionId, Instant.parse("2026-03-08T05:00:00Z"), "1.1111");
+        insertSale(sessionId, Instant.parse("2026-03-09T03:59:59.999999Z"), "2.2222");
+        insertSale(sessionId, Instant.parse("2026-03-09T04:00:00Z"), "4.4444");
+
+        var rows = saleRepository.summarizeOperationalSalesLast7Days(
+            LocalDate.parse("2026-03-03"),
+            LocalDate.parse("2026-03-09"),
+            "America/New_York");
+
+        assertThat(rows).hasSize(7);
+        assertThat(rows).extracting(row -> row.getBusinessDate().toString())
+            .containsExactly(
+                "2026-03-03", "2026-03-04", "2026-03-05", "2026-03-06",
+                "2026-03-07", "2026-03-08", "2026-03-09");
+        assertThat(rows.get(0).getSalesAmount()).isEqualByComparingTo("0");
+        assertThat(rows.get(0).getTransactionCount()).isZero();
+        assertThat(rows.get(5).getSalesAmount()).isEqualByComparingTo("3.3333");
+        assertThat(rows.get(5).getTransactionCount()).isEqualTo(2);
+        assertThat(rows.get(6).getSalesAmount()).isEqualByComparingTo("4.4444");
+        assertThat(rows.get(0).getPeriodSalesAmount()).isEqualByComparingTo("7.7777");
+        assertThat(rows.get(0).getPeriodTransactionCount()).isEqualTo(3);
+    }
+
+    @Test
+    void stockAttentionUsesOnlyActiveStoreStockAndStableBoundedOrdering() {
+        jdbcTemplate.update("UPDATE items SET stock_store = 100.0000 WHERE active = TRUE");
+        long firstZero = insertItem("first zero", "0.0000", "500.0000", true, "PIECE");
+        long secondZero = insertItem("second zero", "0.0000", "0.0000", true, "METER");
+        long fractionalLow = insertItem("fractional low", "0.2500", "999.0000", true, "METER");
+        insertItem("higher low", "9.9999", "0.0000", true, "PIECE");
+        insertItem("threshold boundary", "10.0000", "0.0000", true, "PIECE");
+        insertItem("inactive zero", "0.0000", "0.0000", false, "PIECE");
+
+        var totals = itemRepository.summarizeDashboardStockAttention(
+            new BigDecimal("10.0000"));
+        var preview = itemRepository.findDashboardStockAttentionPreview(
+            new BigDecimal("10.0000"));
+
+        assertThat(totals.getOutOfStockCount()).isEqualTo(2);
+        assertThat(totals.getLowStockCount()).isEqualTo(2);
+        assertThat(preview).hasSize(3);
+        assertThat(preview).extracting("itemId")
+            .containsExactly(firstZero, secondZero, fractionalLow);
+        assertThat(preview).extracting("state")
+            .containsExactly("OUT_OF_STOCK", "OUT_OF_STOCK", "LOW_STOCK");
+        assertThat(preview.get(2).getStockStore()).isEqualByComparingTo("0.2500");
+        assertThat(preview.get(2).getBaseUnitOfMeasure()).isEqualTo("METER");
+    }
+
+    @Test
+    void stockAttentionReturnsZeroCountsAndEmptyPreviewWhenNoActiveItemsMatch() {
+        jdbcTemplate.update("UPDATE items SET active = FALSE");
+
+        var totals = itemRepository.summarizeDashboardStockAttention(
+            new BigDecimal("10.0000"));
+        var preview = itemRepository.findDashboardStockAttentionPreview(
+            new BigDecimal("10.0000"));
+
+        assertThat(totals.getOutOfStockCount()).isZero();
+        assertThat(totals.getLowStockCount()).isZero();
+        assertThat(preview).isEmpty();
     }
 
     @Test
@@ -164,6 +237,24 @@ class OperationalDashboardPostgreSqlIntegrationTest {
                 CURRENT_TIMESTAMP, 'test', 0)
             """, sessionId, "dash-expense-" + suffix, amount, category, voided,
             voided, voided, voided);
+    }
+
+    private long insertItem(
+            String name,
+            String stockStore,
+            String stockWarehouse,
+            boolean active,
+            String baseUnitOfMeasure) {
+        String suffix = UUID.randomUUID().toString();
+        return jdbcTemplate.queryForObject("""
+            INSERT INTO items (
+                name, sku, price, stock_store, stock_warehouse,
+                base_unit_of_measure, fractional_quantity_allowed, active,
+                item_category_id, version
+            ) VALUES (?, ?, 1.0000, ?::numeric, ?::numeric, ?, TRUE, ?, 1, 0)
+            RETURNING id
+            """, Long.class, name, "DASH-ITEM-" + suffix, stockStore, stockWarehouse,
+            baseUnitOfMeasure, active);
     }
 
     private long insertSupplier() {
