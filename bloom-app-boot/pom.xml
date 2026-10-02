@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.bloom</groupId>
         <artifactId>bloom-app</artifactId>
-        <version>0.0.1-SNAPSHOT</version>
+        <version>1.0.0</version>
     </parent>
 
     <artifactId>bloom-app-boot</artifactId>
@@ -15,12 +15,12 @@
         <dependency>
             <groupId>com.bloom</groupId>
             <artifactId>bloom-app-web</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <version>1.0.0</version>
         </dependency>
         <dependency>
             <groupId>com.bloom</groupId>
             <artifactId>bloom-app-service</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <version>1.0.0</version>
         </dependency>
 
         <dependency>
