@@ -24,6 +24,8 @@ public class ErrorCodeConstants {
 
     public static final String PRINTER_NOT_FOUND_CODE = "printer_not_found";
     public static final String PRINTER_NOT_FOUND_MESSAGE = "Printer tidak ditemukan";
+    public static final String PRINTER_UNAVAILABLE_CODE = "printer_unavailable";
+    public static final String PRINTER_UNAVAILABLE_MESSAGE = "Printer tidak tersedia atau sedang offline";
 
     public static final String SALE_NOT_FOUND_CODE = "sale_not_found";
     public static final String SALE_NOT_FOUND_MESSAGE = "Transaksi tidak ditemukan";
