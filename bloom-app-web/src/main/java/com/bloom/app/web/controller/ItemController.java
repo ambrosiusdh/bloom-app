@@ -15,6 +15,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -108,6 +109,24 @@ public class ItemController {
         byte[] pdfBytes = itemService.generateSingleBarcodePdf(sku);
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"barcode-" + sku + ".pdf\"")
+            .contentType(MediaType.APPLICATION_PDF)
+            .body(pdfBytes);
+    }
+
+    @GetMapping(path = "/barcode/category/{categoryCode}", produces = MediaType.APPLICATION_PDF_VALUE)
+    @Operation(
+        summary = "Download category barcodes",
+        description = "Generate and download a printable A4 PDF containing one barcode label for every active item in a category."
+    )
+    public ResponseEntity<byte[]> getCategoryBarcodePdf(
+        @Parameter(description = "The category code") @PathVariable String categoryCode
+    ) {
+        byte[] pdfBytes = itemService.generateCategoryBarcodePdf(categoryCode);
+        ContentDisposition contentDisposition = ContentDisposition.attachment()
+            .filename("barcodes-category-" + categoryCode + ".pdf")
+            .build();
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition.toString())
             .contentType(MediaType.APPLICATION_PDF)
             .body(pdfBytes);
     }

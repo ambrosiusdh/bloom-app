@@ -88,8 +88,8 @@ class PrintServiceImplTest {
     void formatsRupiahWithoutDecimalPlaces() {
         PrintServiceImpl service = new PrintServiceImpl(saleRepository, printerProperties);
 
-        assertThat(service.formatRupiah(new BigDecimal("12500.0000"))).isEqualTo("12500");
-        assertThat(service.formatRupiah(new BigDecimal("12500.5000"))).isEqualTo("12501");
+        assertThat(service.formatRupiah(new BigDecimal("100000.0000"))).isEqualTo("Rp. 100,000");
+        assertThat(service.formatRupiah(new BigDecimal("12500.5000"))).isEqualTo("Rp. 12,501");
     }
 
     private PrintService printer(String name) {

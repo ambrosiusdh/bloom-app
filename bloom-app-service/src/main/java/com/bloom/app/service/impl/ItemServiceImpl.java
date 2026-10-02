@@ -1,5 +1,6 @@
 package com.bloom.app.service.impl;
 
+import com.bloom.app.api.dto.request.item.BulkBarcodeRequest;
 import com.bloom.app.api.dto.request.item.CreateItemRequest;
 import com.bloom.app.api.dto.request.item.FilterItemRequest;
 import com.bloom.app.api.dto.request.item.UpdateItemRequest;
@@ -178,6 +179,29 @@ public class ItemServiceImpl implements ItemService {
             .toList();
 
         return pdfGeneratorUtil.generateBarcodeLayoutPdf(sortedItems);
+    }
+
+    @Override
+    public byte[] generateCategoryBarcodePdf(String categoryCode) {
+        log.debug("ItemService generateCategoryBarcodePdf using categoryCode: {}", categoryCode);
+        ItemCategory category = itemCategoryRepository.findByCode(categoryCode)
+            .orElseThrow(() -> new ResourceNotFoundException(ErrorCode.ITEM_CATEGORY_NOT_FOUND.getMessage()));
+
+        if (!category.isActive()) {
+            throw new IllegalArgumentException(
+                "Category " + categoryCode + " is inactive and cannot generate barcodes");
+        }
+
+        List<Item> items = itemRepository.findAllByCategoryAndActiveTrueOrderBySkuAsc(category);
+        if (items.isEmpty()) {
+            throw new IllegalArgumentException(
+                "Category " + categoryCode + " has no active items to generate barcodes");
+        }
+        if (items.size() > BulkBarcodeRequest.MAX_BARCODES) {
+            throw new IllegalArgumentException("Cannot request more than 100 barcodes at a time");
+        }
+
+        return pdfGeneratorUtil.generateBarcodeLayoutPdf(items);
     }
 
     private void recordOpeningBalance(Item item, BigDecimal quantity, StockLocation stockLocation) {

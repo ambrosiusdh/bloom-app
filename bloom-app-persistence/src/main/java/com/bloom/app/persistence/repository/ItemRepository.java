@@ -70,6 +70,8 @@ public interface ItemRepository extends JpaRepository<Item, Long>, JpaSpecificat
 
     List<Item> findAllByCategory(ItemCategory category);
 
+    List<Item> findAllByCategoryAndActiveTrueOrderBySkuAsc(ItemCategory category);
+
     boolean existsBySku(String sku);
 
     long countByCategoryAndActiveTrue(ItemCategory category);

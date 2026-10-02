@@ -9,6 +9,7 @@ import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
 import com.bloom.app.domain.exception.FractionalQuantityPolicyImmutableException;
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
 import com.bloom.app.domain.model.UnitOfMeasure;
@@ -27,6 +28,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -39,6 +41,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ItemServiceImplTest {
@@ -290,6 +293,111 @@ class ItemServiceImplTest {
         verify(itemMapper).itemToItemResponse(item, true);
     }
 
+    @Test
+    void categoryBarcodeGeneratesFromActiveItemsInRepositorySkuOrder() {
+        ItemCategory category = category(true);
+        Item first = item(1L, true, true);
+        first.setSku("KAIN-00001");
+        Item second = item(2L, true, true);
+        second.setSku("KAIN-00002");
+        List<Item> orderedItems = List.of(first, second);
+        byte[] expectedPdf = new byte[] {4, 5, 6};
+        when(itemCategoryRepository.findByCode("KAIN")).thenReturn(Optional.of(category));
+        when(itemRepository.findAllByCategoryAndActiveTrueOrderBySkuAsc(category))
+            .thenReturn(orderedItems);
+        when(pdfGeneratorUtil.generateBarcodeLayoutPdf(orderedItems)).thenReturn(expectedPdf);
+
+        byte[] result = service.generateCategoryBarcodePdf("KAIN");
+
+        assertThat(result).isSameAs(expectedPdf);
+        verify(itemRepository).findAllByCategoryAndActiveTrueOrderBySkuAsc(category);
+        verify(pdfGeneratorUtil).generateBarcodeLayoutPdf(same(orderedItems));
+    }
+
+    @Test
+    void categoryBarcodeRejectsMissingCategoryBeforeItemQuery() {
+        when(itemCategoryRepository.findByCode("MISSING")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.generateCategoryBarcodePdf("MISSING"))
+            .isInstanceOf(ResourceNotFoundException.class)
+            .hasMessage("Item category not found");
+
+        verifyNoInteractions(itemRepository, pdfGeneratorUtil);
+    }
+
+    @Test
+    void categoryBarcodeRejectsInactiveCategoryBeforeItemQuery() {
+        ItemCategory category = category(false);
+        when(itemCategoryRepository.findByCode("KAIN")).thenReturn(Optional.of(category));
+
+        assertThatThrownBy(() -> service.generateCategoryBarcodePdf("KAIN"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Category KAIN is inactive and cannot generate barcodes");
+
+        verifyNoInteractions(itemRepository, pdfGeneratorUtil);
+    }
+
+    @Test
+    void categoryBarcodeRejectsCategoryWithoutActiveItems() {
+        ItemCategory category = category(true);
+        when(itemCategoryRepository.findByCode("KAIN")).thenReturn(Optional.of(category));
+        when(itemRepository.findAllByCategoryAndActiveTrueOrderBySkuAsc(category))
+            .thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.generateCategoryBarcodePdf("KAIN"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Category KAIN has no active items to generate barcodes");
+
+        verifyNoInteractions(pdfGeneratorUtil);
+    }
+
+    @Test
+    void categoryBarcodeRejectsMoreThanMaximumLabels() {
+        ItemCategory category = category(true);
+        List<Item> items = categoryItems(101);
+        when(itemCategoryRepository.findByCode("KAIN")).thenReturn(Optional.of(category));
+        when(itemRepository.findAllByCategoryAndActiveTrueOrderBySkuAsc(category))
+            .thenReturn(items);
+
+        assertThatThrownBy(() -> service.generateCategoryBarcodePdf("KAIN"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Cannot request more than 100 barcodes at a time");
+
+        verifyNoInteractions(pdfGeneratorUtil);
+    }
+
+    @Test
+    void categoryBarcodeAcceptsExactlyMaximumLabels() {
+        ItemCategory category = category(true);
+        List<Item> items = categoryItems(100);
+        byte[] expectedPdf = new byte[] {7, 8, 9};
+        when(itemCategoryRepository.findByCode("KAIN")).thenReturn(Optional.of(category));
+        when(itemRepository.findAllByCategoryAndActiveTrueOrderBySkuAsc(category))
+            .thenReturn(items);
+        when(pdfGeneratorUtil.generateBarcodeLayoutPdf(items)).thenReturn(expectedPdf);
+
+        byte[] result = service.generateCategoryBarcodePdf("KAIN");
+
+        assertThat(result).isSameAs(expectedPdf);
+        verify(pdfGeneratorUtil).generateBarcodeLayoutPdf(same(items));
+    }
+
+    @Test
+    void categoryBarcodeUsesRepositoryContractThatExcludesInactiveItems() {
+        ItemCategory category = category(true);
+        Item activeItem = item(1L, true, true);
+        activeItem.setSku("KAIN-00001");
+        List<Item> activeItems = List.of(activeItem);
+        when(itemCategoryRepository.findByCode("KAIN")).thenReturn(Optional.of(category));
+        when(itemRepository.findAllByCategoryAndActiveTrueOrderBySkuAsc(category))
+            .thenReturn(activeItems);
+
+        service.generateCategoryBarcodePdf("KAIN");
+
+        verify(itemRepository).findAllByCategoryAndActiveTrueOrderBySkuAsc(category);
+        verify(pdfGeneratorUtil).generateBarcodeLayoutPdf(same(activeItems));
+    }
+
     private ItemResponse stubSuccessfulUpdate(
         Item item,
         UpdateItemRequest request,
@@ -320,5 +428,22 @@ class ItemServiceImplTest {
             .stockWarehouse(BigDecimal.ZERO)
             .active(active)
             .build();
+    }
+
+    private ItemCategory category(boolean active) {
+        return ItemCategory.builder()
+            .code("KAIN")
+            .active(active)
+            .build();
+    }
+
+    private List<Item> categoryItems(int count) {
+        return IntStream.rangeClosed(1, count)
+            .mapToObj(index -> {
+                Item item = item((long) index, true, true);
+                item.setSku(String.format("KAIN-%05d", index));
+                return item;
+            })
+            .toList();
     }
 }

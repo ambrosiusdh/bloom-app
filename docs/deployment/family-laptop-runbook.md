@@ -61,6 +61,13 @@ databases.
 | `BLOOM_LOG_FILE` | No | `logs/bloom-app.log` | Log file location, relative to the process working directory unless absolute. |
 | `BLOOM_SERVER_ADDRESS` | No | `127.0.0.1` | Network interface to bind. Keep the default for a single laptop. |
 | `BLOOM_CORS_ALLOWED_ORIGINS` | No | `http://localhost:5173` | Exact web-client origin. Comma-separate multiple origins only when required. |
+| `BLOOM_BACKUP_ENABLED` | No | `true` | Enables both scheduled and API-triggered backups. |
+| `BLOOM_BACKUP_DIRECTORY` | No | `C:/Bloom/backups` | Directory for automatic and API-triggered database backups. Keep it outside release directories. |
+| `BLOOM_PG_DUMP_PATH` | No | `C:/Program Files/PostgreSQL/15/bin/pg_dump.exe` | `pg_dump` executable. Override this when PostgreSQL is installed elsewhere. |
+| `BLOOM_PG_RESTORE_PATH` | No | `C:/Program Files/PostgreSQL/15/bin/pg_restore.exe` | `pg_restore` executable used to validate every new dump. Override this when PostgreSQL is installed elsewhere. |
+| `BLOOM_BACKUP_RETENTION_DAYS` | No | `30` | Completed Bloom backups older than this are deleted after a successful backup. |
+| `BLOOM_BACKUP_CRON` | No | `0 30 16 * * *` | Six-field Spring cron expression. The default runs daily at 16:30 Asia/Jakarta. |
+| `BLOOM_BACKUP_COMMAND_TIMEOUT` | No | `PT30M` | Maximum duration for each `pg_dump` or validation command. |
 
 Use a PowerShell credential prompt so the database password is not saved in
 shell history:
@@ -71,6 +78,10 @@ $env:BLOOM_DB_URL = 'jdbc:postgresql://127.0.0.1:5432/bloom_app'
 $env:BLOOM_DB_USERNAME = 'bloom_app'
 $databaseCredential = Get-Credential -UserName 'bloom_app' -Message 'Bloom PostgreSQL password'
 $env:BLOOM_DB_PASSWORD = $databaseCredential.GetNetworkCredential().Password
+$postgresBin = 'C:\Program Files\PostgreSQL\15\bin'
+$env:BLOOM_PG_DUMP_PATH = Join-Path $postgresBin 'pg_dump.exe'
+$env:BLOOM_PG_RESTORE_PATH = Join-Path $postgresBin 'pg_restore.exe'
+$env:BLOOM_BACKUP_DIRECTORY = 'C:\Bloom\backups'
 ```
 
 These values live only in that PowerShell process and its child Java process.
@@ -197,8 +208,34 @@ database and logs before restarting.
 
 ## Backup
 
-Create a backup directory outside the release directory and include the date in
-each filename. The custom format supports validation and selective inspection:
+Bloom automatically creates a PostgreSQL custom-format backup every day at
+16:30 Asia/Jakarta, leaving time for it to finish before the usual 17:00
+shutdown. It writes a temporary file, validates it with
+`pg_restore --list`, and only then publishes the `.dump` file. After a
+successful backup it deletes `bloom_app-*.dump` files older than 30 days. A
+failed or interrupted backup is not published, and does not cause application
+startup to fail. Check `logs\bloom-app.log` for the result.
+
+The automatic schedule runs only while Bloom is running. An authenticated user
+can also start the same backup process with `POST /api/backups`; the endpoint
+returns HTTP 202 while the work continues in the background. Poll
+`GET /api/backups/status` until `data.state` is `SUCCEEDED` or `FAILED`. A
+second trigger while one is running returns HTTP 409. If Bloom is already off
+at 16:30, that scheduled run is missed; use the manual endpoint before an early
+shutdown when a same-day backup is required.
+
+For example, reuse the authenticated web application's `JSESSIONID` cookie:
+
+```powershell
+$headers = @{ Cookie = 'JSESSIONID=<value-from-an-authenticated-Bloom-session>' }
+Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8080/api/backups' -Headers $headers
+Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:8080/api/backups/status' -Headers $headers
+```
+
+The original operator command remains useful for recovery if the application
+cannot be started. Create a backup directory outside the release directory and
+include the date in each filename. The custom format supports validation and
+selective inspection:
 
 ```powershell
 $postgresBin = 'C:\Program Files\PostgreSQL\15\bin'

@@ -26,6 +26,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.NumberFormat;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
@@ -204,7 +205,9 @@ public class PrintServiceImpl implements com.bloom.app.service.PrintService {
     }
 
     String formatRupiah(BigDecimal amount) {
-        return amount.setScale(0, RoundingMode.HALF_UP).toPlainString();
+        NumberFormat formatter = NumberFormat.getIntegerInstance(Locale.US);
+        formatter.setRoundingMode(RoundingMode.HALF_UP);
+        return "Rp. " + formatter.format(amount);
     }
 
     private boolean isWindows() {

@@ -26,4 +26,6 @@ public interface ItemService {
     byte[] generateSingleBarcodePdf(String sku);
 
     byte[] generateBulkBarcodePdf(List<String> skus);
+
+    byte[] generateCategoryBarcodePdf(String categoryCode);
 }

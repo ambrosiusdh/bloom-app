@@ -2,6 +2,7 @@ package com.bloom.app.web.controller;
 
 import com.bloom.app.api.dto.response.item.ItemResponse;
 import com.bloom.app.api.exception.GlobalExceptionHandler;
+import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.UnitOfMeasure;
 import com.bloom.app.service.ItemService;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,8 +18,11 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -68,6 +72,52 @@ class ItemControllerTest {
             .andExpect(jsonPath("$.data.stockWarehouse").value(0.0001))
             .andExpect(jsonPath("$.data.baseUnitOfMeasure").value("METER"))
             .andExpect(jsonPath("$.data.fractionalQuantityAllowed").value(true));
+    }
+
+    @Test
+    void categoryBarcodeReturnsPdfAttachmentAndPassesExactCategoryCode() throws Exception {
+        byte[] pdfBytes = new byte[] {1, 2, 3};
+        when(itemService.generateCategoryBarcodePdf("KAIN")).thenReturn(pdfBytes);
+
+        mockMvc.perform(get("/api/items/barcode/category/KAIN"))
+            .andExpect(status().isOk())
+            .andExpect(content().contentType("application/pdf"))
+            .andExpect(header().string(
+                "Content-Disposition",
+                "attachment; filename=\"barcodes-category-KAIN.pdf\""
+            ))
+            .andExpect(content().bytes(pdfBytes));
+
+        verify(itemService).generateCategoryBarcodePdf("KAIN");
+    }
+
+    @Test
+    void categoryBarcodePropagatesCategoryNotFoundAsJsonError() throws Exception {
+        when(itemService.generateCategoryBarcodePdf("MISSING"))
+            .thenThrow(new ResourceNotFoundException("Item category not found"));
+
+        mockMvc.perform(get("/api/items/barcode/category/MISSING"))
+            .andExpect(status().isNotFound())
+            .andExpect(content().contentTypeCompatibleWith("application/json"))
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.message").value("Item category not found"))
+            .andExpect(jsonPath("$.code").value(404))
+            .andExpect(jsonPath("$.errorType").value("ResourceNotFoundException"));
+    }
+
+    @Test
+    void categoryBarcodeLimitFailureReturnsJsonErrorInsteadOfPdf() throws Exception {
+        when(itemService.generateCategoryBarcodePdf("KAIN"))
+            .thenThrow(new IllegalArgumentException("Cannot request more than 100 barcodes at a time"));
+
+        mockMvc.perform(get("/api/items/barcode/category/KAIN"))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().contentTypeCompatibleWith("application/json"))
+            .andExpect(jsonPath("$.success").value(false))
+            .andExpect(jsonPath("$.message")
+                .value("Cannot request more than 100 barcodes at a time"))
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.errorType").value("IllegalArgumentException"));
     }
 
     private ItemResponse completeItemResponse() {

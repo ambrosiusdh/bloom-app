@@ -14,6 +14,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class BulkBarcodeRequest {
+    public static final int MAX_BARCODES = 100;
 
     /**
      * List of SKUs for bulk barcode generation.
@@ -21,6 +22,6 @@ public class BulkBarcodeRequest {
      * Maximum limit is enforced to prevent DOS attacks and resource exhaustion.
      */
     @NotEmpty(message = "SKU list cannot be empty")
-    @Size(max = 100, message = "Cannot request more than 100 barcodes at a time")
+    @Size(max = MAX_BARCODES, message = "Cannot request more than 100 barcodes at a time")
     private List<String> skus;
 }

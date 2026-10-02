@@ -282,6 +282,21 @@ Only `POST /api/stock-adjustments` returns the posting result wrapper. List and 
 
 The concrete `StockMovementResponse` also retains its existing `item` field. No persisted idempotency key is approved for stock-adjustment POST in Release 1. A client must disable duplicate submission while a request is pending and must not automatically retry after an ambiguous timeout.
 
+## Barcode PDF output contract
+
+`GET /api/items/barcode/category/{categoryCode}` returns a raw `application/pdf` download containing
+exactly one barcode label for every active item currently assigned to the identified category. Labels
+are ordered by SKU ascending and use the same A4, three-column layout as the existing single-item and
+bulk barcode PDF endpoints. The download is named `barcodes-category-{categoryCode}.pdf`.
+
+Category barcode generation has a maximum of 100 labels. A missing category returns HTTP 404. An
+inactive category, a category with no active items, or a category with more than 100 active items
+returns HTTP 400; an over-limit category is never truncated or split into multiple downloads. Inactive
+items historically linked to the category are not included.
+
+Generating or downloading a barcode PDF is separate from acknowledging that labels were physically
+printed. It performs no item, inventory, stock, price, payment, or other financial-state mutation.
+
 ## Supplier receipt, accounts-payable, and payment contract
 
 ### Domain boundary
