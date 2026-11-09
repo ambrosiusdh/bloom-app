@@ -9,6 +9,7 @@ import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.BaseUnitOfMeasureImmutableException;
 import com.bloom.app.domain.exception.FractionalQuantityPolicyImmutableException;
+import com.bloom.app.domain.exception.ItemSkuAlreadyExistsException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
@@ -23,8 +24,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.hibernate.exception.ConstraintViolationException;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -60,6 +64,111 @@ class ItemServiceImplTest {
         pdfGeneratorUtil,
         stockMovementService
     );
+
+    @Test
+    void duplicateCreationIsRejectedBeforeMappingSavingOrOpeningStock() {
+        CreateItemRequest request = CreateItemRequest.builder()
+            .categoryCode("KAIN").sku("TAKEN")
+            .stockStore(BigDecimal.TEN).stockWarehouse(BigDecimal.TEN).build();
+        when(itemCategoryRepository.findByCode("KAIN")).thenReturn(Optional.of(category(true)));
+        when(itemRepository.existsBySku("TAKEN")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.createItem(request))
+            .isInstanceOf(ItemSkuAlreadyExistsException.class)
+            .hasMessage("Item SKU already exists: TAKEN");
+
+        verify(itemRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(itemMapper, stockMovementService, itemCategoryCounterRepository);
+    }
+
+    @Test
+    void generatedSkuCollisionUsesTheSameConflictBeforeOpeningStock() {
+        ItemCategory category = category(true);
+        category.setId(7L);
+        when(itemCategoryRepository.findByCode("KAIN")).thenReturn(Optional.of(category));
+        when(itemCategoryCounterRepository.incrementAndGetSequence(7L)).thenReturn(1L);
+        when(itemRepository.existsBySku("KAIN-00001")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.createItem(CreateItemRequest.builder()
+                .categoryCode("KAIN").build()))
+            .isInstanceOf(ItemSkuAlreadyExistsException.class)
+            .hasMessage("Item SKU already exists: KAIN-00001");
+
+        verify(itemRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(itemMapper, stockMovementService);
+    }
+
+    @Test
+    void conflictingUpdateIsRejectedBeforeMutatingTheManagedItem() {
+        Item item = item(42L, true, true);
+        item.setName("Original");
+        UpdateItemRequest request = UpdateItemRequest.builder()
+            .sku("TAKEN").name("Rejected rename").price(BigDecimal.TEN).build();
+        when(itemRepository.findItemBySku("ITEM-1")).thenReturn(Optional.of(item));
+        when(itemRepository.existsBySku("TAKEN")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.updateItem("ITEM-1", request))
+            .isInstanceOf(ItemSkuAlreadyExistsException.class)
+            .hasMessage("Item SKU already exists: TAKEN");
+
+        assertThat(item.getSku()).isEqualTo("ITEM-1");
+        assertThat(item.getName()).isEqualTo("Original");
+        verify(itemRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(itemMapper, stockMovementService);
+    }
+
+    @Test
+    void keepingOwnSkuDoesNotCheckItAgainstItself() {
+        Item item = item(42L, true, true);
+        UpdateItemRequest request = UpdateItemRequest.builder().sku("ITEM-1").name("Renamed").build();
+        ItemResponse expected = stubSuccessfulUpdate(item, request, true);
+
+        assertThat(service.updateItem("ITEM-1", request)).isSameAs(expected);
+
+        verify(itemRepository, never()).existsBySku(any());
+        verify(itemMapper).updateRequestToEntity(request, item);
+        verify(itemRepository).saveAndFlush(item);
+    }
+
+    @Test
+    void omittedSkuRemainsAPartialUpdate() {
+        Item item = item(42L, true, true);
+        UpdateItemRequest request = UpdateItemRequest.builder().name("Renamed").build();
+        ItemResponse expected = stubSuccessfulUpdate(item, request, false);
+
+        assertThat(service.updateItem("ITEM-1", request)).isSameAs(expected);
+
+        verify(itemRepository, never()).existsBySku(any());
+        assertThat(item.getSku()).isEqualTo("ITEM-1");
+    }
+
+    @Test
+    void unrelatedCreateIntegrityFailureIsNotReportedAsDuplicateSkuOrGivenOpeningStock() {
+        Item item = item(null, true, true);
+        CreateItemRequest request = CreateItemRequest.builder()
+            .categoryCode("KAIN").sku("ITEM-1").stockStore(BigDecimal.TEN).build();
+        when(itemCategoryRepository.findByCode("KAIN")).thenReturn(Optional.of(category(true)));
+        when(itemMapper.createRequestToEntity(request)).thenReturn(item);
+        DataIntegrityViolationException failure = new DataIntegrityViolationException("not-null failure");
+        when(itemRepository.saveAndFlush(item)).thenThrow(failure);
+
+        assertThatThrownBy(() -> service.createItem(request)).isSameAs(failure);
+
+        verifyNoInteractions(stockMovementService);
+    }
+
+    @Test
+    void unrelatedUniqueConstraintOnUpdateIsNotReportedAsDuplicateSku() {
+        Item item = item(42L, true, true);
+        UpdateItemRequest request = UpdateItemRequest.builder().sku("ITEM-1").build();
+        when(itemRepository.findItemBySku("ITEM-1")).thenReturn(Optional.of(item));
+        DataIntegrityViolationException failure = new DataIntegrityViolationException("other unique key",
+            new ConstraintViolationException("duplicate", new SQLException("duplicate", "23505"),
+                "some_other_unique_key"));
+        when(itemRepository.saveAndFlush(item)).thenThrow(failure);
+
+        assertThatThrownBy(() -> service.updateItem("ITEM-1", request)).isSameAs(failure);
+    }
 
     @Test
     void recordsNonzeroOpeningBalancesAsLedgerMovements() {

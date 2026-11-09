@@ -14,6 +14,8 @@ public class ErrorCodeConstants {
 
     public static final String ITEM_NOT_FOUND_CODE = "item_not_found";
     public static final String ITEM_NOT_FOUND_MESSAGE = "Item not found for: %s";
+    public static final String ITEM_SKU_ALREADY_EXISTS_CODE = "item_sku_already_exists";
+    public static final String ITEM_SKU_ALREADY_EXISTS_MESSAGE = "Item SKU already exists: %s";
     public static final String ITEM_QUANTITY_MUST_BE_POSITIVE_CODE = "item_quantity_must_be_positive";
     public static final String ITEM_QUANTITY_MUST_BE_POSITIVE_MESSAGE = "Item quantity must be positive";
 

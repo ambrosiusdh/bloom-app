@@ -191,6 +191,40 @@ The public item list and detail responses expose the same inventory state: `acti
 
 `stockStore` and `stockWarehouse` are independent quantities. Clients must not merge them. The legacy `stockQuantity` response field was temporary compatibility only and was removed in the Release 1 destructive-contract cleanup. Clients must use `stockStore` and `stockWarehouse`; no aggregate inventory response field is authoritative.
 
+### Duplicate SKU response
+
+`POST /api/items` and `PUT /api/items/{sku}` reject a SKU already assigned to
+another item with HTTP **409 Conflict** and this JSON error envelope:
+
+```json
+{
+  "success": false,
+  "code": "item_sku_already_exists",
+  "errorType": "ItemSkuAlreadyExistsException",
+  "message": "Item SKU already exists: EXAMPLE-001",
+  "field": "sku",
+  "rejectedValue": "EXAMPLE-001"
+}
+```
+
+Clients identify this condition by the stable `code`, associate it with `field`,
+and may use `rejectedValue` in localized feedback. They must not infer a duplicate
+SKU from every 409 response or parse the English `message`. A rejected submission
+keeps the user on the form with entered values, including opening quantities,
+and permits correction and resubmission without automatic retry.
+
+Keeping an item's own SKU, or omitting `sku` from an update, remains valid.
+SKU comparison retains the existing exact, case-sensitive database semantics;
+inactive items also reserve their SKU. Both flows check availability before
+mapping changes. PostgreSQL's existing `items_sku_key` unique constraint remains
+the final authority if availability changes concurrently. Only SQLSTATE `23505`
+for that named constraint is translated to this conflict; unrelated integrity
+failures retain their existing error mapping.
+
+Rejected creates and updates roll back the transaction and leave existing item
+data, balances, and stock movements unchanged. Creation flushes the item before
+recording any opening-balance movements.
+
 ### Stock authority
 
 `StockMovement` is the authoritative stock ledger. `Item.stockStore` and `Item.stockWarehouse` are derived, transactionally maintained balance fields for their respective locations.

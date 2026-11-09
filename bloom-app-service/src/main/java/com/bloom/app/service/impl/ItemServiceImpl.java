@@ -10,6 +10,7 @@ import com.bloom.app.domain.enums.MovementSourceType;
 import com.bloom.app.domain.enums.MovementType;
 import com.bloom.app.domain.enums.StockLocation;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
+import com.bloom.app.domain.exception.ItemSkuAlreadyExistsException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.model.Item;
 import com.bloom.app.domain.model.ItemCategory;
@@ -30,6 +31,8 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.hibernate.exception.ConstraintViolationException;
 
 import java.util.List;
 import java.util.Map;
@@ -61,6 +64,7 @@ public class ItemServiceImpl implements ItemService {
         } else {
             sku = request.getSku();
         }
+        assertSkuAvailable(sku);
 
         boolean fractionalQuantityAllowed = Boolean.TRUE.equals(request.getFractionalQuantityAllowed());
         BigDecimal openingStore = openingBalanceOrZero(request.getStockStore());
@@ -72,7 +76,7 @@ public class ItemServiceImpl implements ItemService {
         assertZeroInitialBalances(item);
         item.setCategory(itemCategory);
         item.setSku(sku);
-        Item savedItem = itemRepository.saveAndFlush(item);
+        Item savedItem = saveItem(item);
         recordOpeningBalance(savedItem, openingStore, StockLocation.STORE);
         recordOpeningBalance(savedItem, openingWarehouse, StockLocation.WAREHOUSE);
         boolean hasStockMovements = openingStore.signum() > 0 || openingWarehouse.signum() > 0;
@@ -85,6 +89,9 @@ public class ItemServiceImpl implements ItemService {
         log.debug("ItemService updateItem using request: {}", request);
         Item item = itemRepository.findItemBySku(sku)
             .orElseThrow(() -> new ResourceNotFoundException("Item not found"));
+        if (request.getSku() != null && !request.getSku().equals(item.getSku())) {
+            assertSkuAvailable(request.getSku());
+        }
         boolean hasStockMovements = stockMovementService.validateMeasurementRuleChanges(
             item,
             request.getBaseUnitOfMeasure(),
@@ -94,7 +101,7 @@ public class ItemServiceImpl implements ItemService {
         InventoryQuantityValidator.validateStock(item.getStockStore(), item.isFractionalQuantityAllowed());
         InventoryQuantityValidator.validateStock(item.getStockWarehouse(), item.isFractionalQuantityAllowed());
         try {
-            return itemMapper.itemToItemResponse(itemRepository.saveAndFlush(item), hasStockMovements);
+            return itemMapper.itemToItemResponse(saveItem(item), hasStockMovements);
         } catch (OptimisticLockingFailureException exception) {
             throw new StockConcurrencyException(item.getSku(), exception);
         }
@@ -202,6 +209,29 @@ public class ItemServiceImpl implements ItemService {
         }
 
         return pdfGeneratorUtil.generateBarcodeLayoutPdf(items);
+    }
+
+    private void assertSkuAvailable(String sku) {
+        if (itemRepository.existsBySku(sku)) {
+            throw new ItemSkuAlreadyExistsException(sku);
+        }
+    }
+
+    private Item saveItem(Item item) {
+        try {
+            return itemRepository.saveAndFlush(item);
+        } catch (DataIntegrityViolationException exception) {
+            // The database closes the race after the precheck. Do not query a failed transaction
+            // or misclassify unrelated integrity failures as duplicate SKUs.
+            for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+                if (cause instanceof ConstraintViolationException constraint
+                        && "23505".equals(constraint.getSQLState())
+                        && "items_sku_key".equals(constraint.getConstraintName())) {
+                    throw new ItemSkuAlreadyExistsException(item.getSku(), exception);
+                }
+            }
+            throw exception;
+        }
     }
 
     private void recordOpeningBalance(Item item, BigDecimal quantity, StockLocation stockLocation) {

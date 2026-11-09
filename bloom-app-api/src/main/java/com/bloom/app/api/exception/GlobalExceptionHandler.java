@@ -11,6 +11,7 @@ import com.bloom.app.domain.exception.IdempotencyConflictException;
 import com.bloom.app.domain.exception.GoodsReceiptConflictException;
 import com.bloom.app.domain.exception.GoodsReceiptIdempotencyConflictException;
 import com.bloom.app.domain.exception.InsufficientStockException;
+import com.bloom.app.domain.exception.ItemSkuAlreadyExistsException;
 import com.bloom.app.domain.exception.ResourceNotFoundException;
 import com.bloom.app.domain.exception.StockConcurrencyException;
 import com.bloom.app.domain.exception.SupplierPaymentConflictException;
@@ -96,6 +97,18 @@ public class GlobalExceptionHandler {
         body.put("errorType", ex.getClass().getSimpleName());
 
         return ResponseEntity.status(ex.getStatusCode()).body(body);
+    }
+
+    @ExceptionHandler(ItemSkuAlreadyExistsException.class)
+    public ResponseEntity<?> handleItemSkuAlreadyExists(ItemSkuAlreadyExistsException ex) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", false);
+        body.put("message", ex.getMessage());
+        body.put("code", ex.getErrorCode().getCode());
+        body.put("errorType", ex.getClass().getSimpleName());
+        body.put("field", "sku");
+        body.put("rejectedValue", ex.getSku());
+        return ResponseEntity.status(ex.getErrorCode().getStatus()).body(body);
     }
 
     @ExceptionHandler(BusinessException.class)
